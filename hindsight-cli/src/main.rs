@@ -295,7 +295,7 @@ enum OperationCommands {
 }
 
 fn main() {
-    if let Err(e) = run() {
+    if let Err(_) = run() {
         std::process::exit(1);
     }
 }

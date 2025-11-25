@@ -124,12 +124,6 @@ impl Config {
     pub fn api_url(&self) -> &str {
         &self.api_url
     }
-
-    pub fn config_file_path_display() -> String {
-        Self::config_file_path()
-            .map(|p| p.display().to_string())
-            .unwrap_or_else(|| "~/.hindsight/config.toml".to_string())
-    }
 }
 
 /// Prompt user for API URL interactively

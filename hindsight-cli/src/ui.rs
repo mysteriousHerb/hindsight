@@ -1,14 +1,7 @@
-use crate::api::{Agent, AgentProfile, Fact, PersonalityTraits, SearchResponse, ThinkResponse, TraceInfo};
+use crate::api::{AgentProfile, Fact, SearchResponse, ThinkResponse, TraceInfo};
 use colored::*;
 use indicatif::{ProgressBar, ProgressStyle};
 use std::io::{self, Write};
-
-pub fn print_banner() {
-    println!("{}", "╔══════════════════════════════════════════════════╗".bright_cyan());
-    println!("{}", "║            MEMORA - Memory CLI                   ║".bright_cyan());
-    println!("{}", "╚══════════════════════════════════════════════════╝".bright_cyan());
-    println!();
-}
 
 pub fn print_section_header(title: &str) {
     println!();
@@ -126,42 +119,6 @@ pub fn print_trace_info(trace: &TraceInfo) {
     println!();
 }
 
-pub fn print_agents_table(agents: &[Agent]) {
-    print_section_header(&format!("Agents ({})", agents.len()));
-
-    if agents.is_empty() {
-        println!("{}", "  No agents found.".bright_black());
-        return;
-    }
-
-    // Calculate column width
-    let max_id_len = agents.iter().map(|a| a.agent_id.len()).max().unwrap_or(8);
-    let id_width = max_id_len.max(8);
-
-    // Print header
-    println!("  ┌{}┐",
-        "─".repeat(id_width + 2));
-
-    println!("  │ {:<width$} │",
-        "Agent ID".bright_cyan().bold(),
-        width = id_width);
-
-    println!("  ├{}┤",
-        "─".repeat(id_width + 2));
-
-    // Print rows
-    for agent in agents {
-        println!("  │ {:<width$} │",
-            agent.agent_id,
-            width = id_width);
-    }
-
-    println!("  └{}┘",
-        "─".repeat(id_width + 2));
-
-    println!();
-}
-
 pub fn print_success(message: &str) {
     println!("{} {}", "✓".bright_green().bold(), message.bright_white());
 }
@@ -201,22 +158,6 @@ pub fn create_progress_bar(total: u64, message: &str) -> ProgressBar {
     );
     pb.set_message(message.to_string());
     pb
-}
-
-pub fn print_stored_memory(doc_id: &str, content: &str, is_async: bool) {
-    if is_async {
-        println!("{} Queued for background processing", "⏳".bright_yellow());
-    } else {
-        println!("{} Stored successfully", "✓".bright_green());
-    }
-    println!("  Document ID: {}", doc_id.bright_cyan());
-    let preview = if content.len() > 60 {
-        format!("{}...", &content[..57])
-    } else {
-        content.to_string()
-    };
-    println!("  Content: {}", preview.bright_black());
-    println!();
 }
 
 pub fn prompt_confirmation(message: &str) -> io::Result<bool> {
@@ -291,99 +232,6 @@ pub fn print_profile(profile: &AgentProfile) {
         "Personality Influence",
         bar.bright_green(),
         bias * 100.0
-    );
-    println!("  {}", "(how much personality shapes opinions)".bright_black());
-    println!();
-}
-
-pub fn print_personality_delta(old: &PersonalityTraits, new: &PersonalityTraits) {
-    println!();
-    println!("{}", "─── Personality Changes ───".bright_yellow());
-    println!();
-
-    let traits = [
-        ("Openness", old.openness, new.openness, "🔓", "green"),
-        ("Conscientiousness", old.conscientiousness, new.conscientiousness, "📋", "yellow"),
-        ("Extraversion", old.extraversion, new.extraversion, "🗣️", "cyan"),
-        ("Agreeableness", old.agreeableness, new.agreeableness, "🤝", "magenta"),
-        ("Neuroticism", old.neuroticism, new.neuroticism, "😰", "yellow"),
-    ];
-
-    for (name, old_value, new_value, emoji, color) in &traits {
-        let bar_length = 40;
-        let filled = (*new_value * bar_length as f32) as usize;
-        let empty = bar_length - filled;
-
-        // Create bar with pattern if there's a change
-        let delta = new_value - old_value;
-        let has_change = delta.abs() >= 0.01;
-
-        let bar = if has_change {
-            // Add pattern for changes (using different characters to show change)
-            let pattern_filled = filled.min(3);
-            format!("{}{}{}",
-                "█".repeat(filled.saturating_sub(pattern_filled)),
-                "▓".repeat(pattern_filled),
-                "░".repeat(empty)
-            )
-        } else {
-            format!("{}{}", "█".repeat(filled), "░".repeat(empty))
-        };
-
-        let colored_bar = match *color {
-            "green" => bar.bright_green(),
-            "yellow" => bar.bright_yellow(),
-            "cyan" => bar.bright_cyan(),
-            "magenta" => bar.bright_magenta(),
-            _ => bar.bright_white(),
-        };
-
-        let delta_str = if has_change {
-            format!(" → {:.0}%", new_value * 100.0)
-        } else {
-            format!(" {:.0}%", new_value * 100.0)
-        };
-
-        println!("  {} {:<20} [{}]{}",
-            emoji,
-            name,
-            colored_bar,
-            delta_str
-        );
-    }
-
-    println!();
-    println!("{}", "Bias Strength:".bright_yellow());
-    let old_bias = old.bias_strength;
-    let new_bias = new.bias_strength;
-    let bar_length = 40;
-    let filled = (new_bias * bar_length as f32) as usize;
-    let empty = bar_length - filled;
-
-    let delta = new_bias - old_bias;
-    let has_change = delta.abs() >= 0.01;
-
-    let bar = if has_change {
-        let pattern_filled = filled.min(3);
-        format!("{}{}{}",
-            "█".repeat(filled.saturating_sub(pattern_filled)),
-            "▓".repeat(pattern_filled),
-            "░".repeat(empty)
-        )
-    } else {
-        format!("{}{}", "█".repeat(filled), "░".repeat(empty))
-    };
-
-    let delta_str = if has_change {
-        format!(" → {:.0}%", new_bias * 100.0)
-    } else {
-        format!(" {:.0}%", new_bias * 100.0)
-    };
-
-    println!("  💪 {:<20} [{}]{}",
-        "Personality Influence",
-        bar.bright_green(),
-        delta_str
     );
     println!("  {}", "(how much personality shapes opinions)".bright_black());
     println!();

@@ -8,17 +8,6 @@ pub enum OutputFormat {
     Yaml,
 }
 
-impl OutputFormat {
-    pub fn from_str(s: &str) -> Option<Self> {
-        match s.to_lowercase().as_str() {
-            "pretty" | "default" => Some(OutputFormat::Pretty),
-            "json" => Some(OutputFormat::Json),
-            "yaml" | "yml" => Some(OutputFormat::Yaml),
-            _ => None,
-        }
-    }
-}
-
 pub fn print_output<T: Serialize>(data: &T, format: OutputFormat) -> Result<()> {
     match format {
         OutputFormat::Json => {

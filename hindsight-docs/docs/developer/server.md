@@ -61,24 +61,49 @@ helm install hindsight hindsight/hindsight \
 
 See the [Helm chart documentation](https://github.com/vectorize-io/hindsight/tree/main/deploy/helm) for configuration options.
 
-### Bare Metal / pip install
+### pip install
 
-For custom deployments, install the API server directly:
+For custom deployments, install the all-in-one package:
 
 ```bash
-pip install hindsight-api
+pip install hindsight-all
 ```
 
 Run the server:
 
 ```bash
-python -m hindsight_api.web.server --host 0.0.0.0 --port 8888
+# Configure via environment variables
+export HINDSIGHT_API_LLM_PROVIDER=groq
+export HINDSIGHT_API_LLM_API_KEY=gsk_xxxxxxxxxxxx
+
+# Start the server (Ctrl+C to stop)
+hindsight-api
 ```
 
-You'll need to:
-1. Provision PostgreSQL with pgvector extension
-2. Set environment variables (see [Configuration](#environment-variables))
-3. Handle process management (systemd, supervisor, etc.)
+By default, it uses `pg0` (embedded PostgreSQL) so you can run it without any external dependencies.
+
+#### CLI Options
+
+```bash
+hindsight-api --help
+
+# Common options
+hindsight-api --port 9000           # Custom port (default: 8888)
+hindsight-api --host 127.0.0.1      # Bind to localhost only
+hindsight-api --mcp                 # Enable MCP server at /mcp
+hindsight-api --log-level debug     # Verbose logging
+```
+
+#### Using External PostgreSQL
+
+To use an external PostgreSQL database instead of embedded pg0:
+
+```bash
+export HINDSIGHT_API_DATABASE_URL=postgresql://user:pass@localhost:5432/hindsight
+hindsight-api
+```
+
+You'll need PostgreSQL with the pgvector extension enabled.
 
 ## Architecture Overview
 

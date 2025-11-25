@@ -1,16 +1,8 @@
 use anyhow::{Context, Result};
-use reqwest::blocking::{Client, Response};
+use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::time::Duration;
-
-pub struct ApiError {
-    pub url: String,
-    pub request_body: String,
-    pub response_status: Option<u16>,
-    pub response_body: Option<String>,
-    pub error: anyhow::Error,
-}
 
 #[derive(Debug, Serialize)]
 pub struct SearchRequest {
@@ -123,11 +115,6 @@ pub struct AgentProfile {
     pub name: String,
     pub personality: PersonalityTraits,
     pub background: String,
-}
-
-#[derive(Debug, Serialize)]
-pub struct UpdatePersonalityRequest {
-    pub personality: PersonalityTraits,
 }
 
 #[derive(Debug, Serialize)]
@@ -442,64 +429,6 @@ impl ApiClient {
         let url = format!("{}/api/v1/agents/{}", self.base_url, agent_id);
         let request = UpdateNameRequest {
             name: name.to_string(),
-        };
-
-        if verbose {
-            eprintln!("Request URL: {}", url);
-            eprintln!("Request body:\n{}", serde_json::to_string_pretty(&request).unwrap_or_default());
-        }
-
-        let response = self
-            .client
-            .put(&url)
-            .json(&request)
-            .timeout(Duration::from_secs(30))
-            .send()?;
-
-        let status = response.status();
-        if verbose {
-            eprintln!("Response status: {}", status);
-        }
-
-        if !status.is_success() {
-            let error_body = response.text().unwrap_or_default();
-            if verbose {
-                eprintln!("Error response body:\n{}", error_body);
-            }
-            anyhow::bail!("API returned error status {}: {}", status, error_body);
-        }
-
-        let response_text = response.text()?;
-        if verbose {
-            eprintln!("Response body:\n{}", response_text);
-        }
-
-        let result: AgentProfile = serde_json::from_str(&response_text)
-            .with_context(|| format!("Failed to parse API response. Response was: {}", response_text))?;
-        Ok(result)
-    }
-
-    pub fn update_personality(
-        &self,
-        agent_id: &str,
-        openness: f32,
-        conscientiousness: f32,
-        extraversion: f32,
-        agreeableness: f32,
-        neuroticism: f32,
-        bias_strength: f32,
-        verbose: bool,
-    ) -> Result<AgentProfile> {
-        let url = format!("{}/api/v1/agents/{}/profile", self.base_url, agent_id);
-        let request = UpdatePersonalityRequest {
-            personality: PersonalityTraits {
-                openness,
-                conscientiousness,
-                extraversion,
-                agreeableness,
-                neuroticism,
-                bias_strength,
-            },
         };
 
         if verbose {

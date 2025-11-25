@@ -1,4 +1,3 @@
-use anyhow::Result;
 use colored::*;
 
 pub fn handle_api_error(err: anyhow::Error, api_url: &str) -> ! {
