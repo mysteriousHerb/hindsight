@@ -252,11 +252,36 @@ The context contains memory facts extracted from previous conversations, each wi
 - First convert ALL relative references to absolute dates, then answer the question
 - Show your date conversion work in your reasoning
 
+**Counting Questions (CRITICAL for "how many" questions):**
+- **Count every unique item** - don't stop at the first few you find
+- **Check all facts and chunks** before giving your final count
+- **Watch for duplicates**: The same item may appear in multiple facts. Deduplicate by checking if two facts refer to the same underlying item/event
+- **Watch for different descriptions of same thing**: "Dr. Patel (ENT specialist)" and "the ENT specialist" might be the same doctor
+- **List each item as you count** to avoid missing any: "1. X, 2. Y, 3. Z = 3 items"
+- **Don't over-interpret**: A project you "completed" is different from a project you're "leading"
+- **Don't double-count**: If the same charity event is mentioned in two conversations, it's still one event
+
+**Disambiguation Guidance (CRITICAL - many errors come from over-counting):**
+- **Assume overlap by default**: If two facts describe similar events (same type, similar timeframe, similar details), assume they are the SAME event unless there's clear evidence they are different
+- If a person has a name AND a role mentioned, check if they're the same person before counting separately
+- If an amount is mentioned multiple times on different dates, check if it's the same event or different events
+- When facts reference the same underlying event from different sessions, count it once
+- **Check for aliases**: "my college roommate's wedding" and "Emily's wedding" might be the same event
+- **Check for time period overlap**: Two "week-long breaks" mentioned in overlapping time periods are likely the same break
+- **When in doubt, undercount**: It's better to miss a duplicate than to count the same thing twice
+
+**Question Interpretation (read carefully):**
+- "How many X before Y?" - count only X that happened BEFORE Y, not Y itself
+- "How many properties viewed before making an offer on Z?" - count OTHER properties, not Z
+- "How many X in the last week/month?" - calculate the exact date range from the question date, then filter
+- Pay attention to qualifiers like "before", "after", "initially", "currently", "in total"
+
 **When to Say "I Don't Know":**
 - If the question asks about something not in the retrieved context, say "I don't have information about X"
 - If comparing two things (e.g., "which happened first, X or Y?") but only one is mentioned, explicitly say the other is missing
 - Don't guess or infer dates that aren't explicitly stated in the facts or chunks
 - If you cannot find a specific piece of information after checking all facts and chunks, admit it
+- **Partial knowledge is OK**: If asked about two things and you only have info on one, provide what you know and note what's missing (don't just say "I don't know")
 
 **How to Answer:**
 1. Scan the facts to find relevant memories
@@ -266,6 +291,7 @@ The context contains memory facts extracted from previous conversations, each wi
 5. Synthesize information from multiple facts if needed
 6. If facts conflict, prefer more recent information
 7. Double-check any date calculations before answering
+8. **For counting questions**: List each unique item before giving your total count
 
 """
         else:
@@ -345,7 +371,7 @@ Answer:
                     ],
                     response_format=QuestionAnswer,
                     scope="memory",
-                    max_tokens=8192,
+                    max_tokens=32768,
                 )
                 return answer_obj.answer, answer_obj.reasoning + " (question date: " + formatted_question_date + ")", None
             except Exception as e:

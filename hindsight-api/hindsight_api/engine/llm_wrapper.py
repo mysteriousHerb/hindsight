@@ -345,6 +345,18 @@ class LLMConfig:
 
                 return result
 
+            except json.JSONDecodeError as e:
+                # Handle truncated JSON responses (often from MAX_TOKENS) with retry
+                last_exception = e
+                if attempt < max_retries:
+                    logger.warning(f"Gemini returned invalid JSON (truncated response?), retrying... (attempt {attempt + 1}/{max_retries + 1})")
+                    backoff = min(initial_backoff * (2 ** attempt), max_backoff)
+                    await asyncio.sleep(backoff)
+                    continue
+                else:
+                    logger.error(f"Gemini returned invalid JSON after {max_retries + 1} attempts: {str(e)}")
+                    raise
+
             except genai_errors.APIError as e:
                 # Handle rate limits and server errors with retry
                 if e.code in (429, 503, 500):
