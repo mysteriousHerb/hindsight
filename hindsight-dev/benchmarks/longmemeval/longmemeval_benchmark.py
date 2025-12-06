@@ -128,7 +128,7 @@ class LongMemEvalDataset(BenchmarkDataset):
 
 class QuestionAnswer(pydantic.BaseModel):
     answer: str
-    reasoning: str
+    reasoning: Optional[str] = None
 
 class LongMemEvalAnswerGenerator(LLMAnswerGenerator):
     """LongMemEval-specific answer generator using configurable LLM provider."""
@@ -381,7 +381,11 @@ Answer:
                     scope="memory",
                     max_tokens=32768,
                 )
-                return answer_obj.answer, answer_obj.reasoning + " (question date: " + formatted_question_date + ")", None
+                reasoning_text = answer_obj.reasoning or ""
+                if reasoning_text:
+                    reasoning_text = reasoning_text + " "
+                reasoning_text += f"(question date: {formatted_question_date})"
+                return answer_obj.answer, reasoning_text, None
             except Exception as e:
                 return f"Error generating answer: {str(e)}", "Error occurred during answer generation.", None
 
