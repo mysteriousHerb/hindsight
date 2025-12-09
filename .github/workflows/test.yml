@@ -182,7 +182,7 @@ jobs:
 
     - name: Start API server
       run: |
-        ./scripts/dev/start-api.sh &
+        ./scripts/dev/start-api.sh > /tmp/api-server.log 2>&1 &
         echo "Waiting for API server to be ready..."
         for i in {1..60}; do
           if curl -sf http://localhost:8888/health > /dev/null 2>&1; then
@@ -191,6 +191,7 @@ jobs:
           fi
           if [ $i -eq 60 ]; then
             echo "API server failed to start after 60s"
+            cat /tmp/api-server.log
             exit 1
           fi
           sleep 1
@@ -199,6 +200,12 @@ jobs:
     - name: Run Python client tests
       working-directory: ./hindsight-clients/python
       run: uv run pytest tests -v
+
+    - name: Show API server logs
+      if: always()
+      run: |
+        echo "=== API Server Logs ==="
+        cat /tmp/api-server.log || echo "No API server log found"
 
   test-typescript-client:
     runs-on: ubuntu-latest
@@ -253,7 +260,7 @@ jobs:
 
     - name: Start API server
       run: |
-        ./scripts/dev/start-api.sh &
+        ./scripts/dev/start-api.sh > /tmp/api-server.log 2>&1 &
         echo "Waiting for API server to be ready..."
         for i in {1..60}; do
           if curl -sf http://localhost:8888/health > /dev/null 2>&1; then
@@ -262,6 +269,7 @@ jobs:
           fi
           if [ $i -eq 60 ]; then
             echo "API server failed to start after 60s"
+            cat /tmp/api-server.log
             exit 1
           fi
           sleep 1
@@ -270,6 +278,12 @@ jobs:
     - name: Run TypeScript client tests
       working-directory: ./hindsight-clients/typescript
       run: npm test
+
+    - name: Show API server logs
+      if: always()
+      run: |
+        echo "=== API Server Logs ==="
+        cat /tmp/api-server.log || echo "No API server log found"
 
   test-rust-client:
     runs-on: ubuntu-latest
@@ -323,7 +337,7 @@ jobs:
 
     - name: Start API server
       run: |
-        ./scripts/dev/start-api.sh &
+        ./scripts/dev/start-api.sh > /tmp/api-server.log 2>&1 &
         echo "Waiting for API server to be ready..."
         for i in {1..60}; do
           if curl -sf http://localhost:8888/health > /dev/null 2>&1; then
@@ -332,6 +346,7 @@ jobs:
           fi
           if [ $i -eq 60 ]; then
             echo "API server failed to start after 60s"
+            cat /tmp/api-server.log
             exit 1
           fi
           sleep 1
@@ -340,3 +355,9 @@ jobs:
     - name: Run Rust client tests
       working-directory: ./hindsight-clients/rust
       run: cargo test --lib
+
+    - name: Show API server logs
+      if: always()
+      run: |
+        echo "=== API Server Logs ==="
+        cat /tmp/api-server.log || echo "No API server log found"

@@ -84,18 +84,7 @@ class SentenceTransformersEmbeddings(Embeddings):
             )
 
         logger.info(f"Loading embedding model: {self.model_name}...")
-        # Try to detect best device, with fallback for meta tensor issues
-        import torch
-        device = "cuda" if torch.cuda.is_available() else "cpu"
-        try:
-            self._model = SentenceTransformer(self.model_name, device=device)
-        except NotImplementedError as e:
-            # Handle "meta tensor" error from accelerate/safetensors lazy loading
-            if "meta tensor" in str(e):
-                logger.warning(f"Meta tensor error, retrying with explicit CPU device: {e}")
-                self._model = SentenceTransformer(self.model_name, device="cpu")
-            else:
-                raise
+        self._model = SentenceTransformer(self.model_name)
 
         # Validate dimension matches database schema
         model_dim = self._model.get_sentence_embedding_dimension()

@@ -78,18 +78,7 @@ class SentenceTransformersCrossEncoder(CrossEncoderModel):
             )
 
         logger.info(f"Loading cross-encoder model: {self.model_name}...")
-        # Try to detect best device, with fallback for meta tensor issues
-        import torch
-        device = "cuda" if torch.cuda.is_available() else "cpu"
-        try:
-            self._model = CrossEncoder(self.model_name, device=device)
-        except NotImplementedError as e:
-            # Handle "meta tensor" error from accelerate/safetensors lazy loading
-            if "meta tensor" in str(e):
-                logger.warning(f"Meta tensor error, retrying with explicit CPU device: {e}")
-                self._model = CrossEncoder(self.model_name, device="cpu")
-            else:
-                raise
+        self._model = CrossEncoder(self.model_name)
         logger.info("Cross-encoder model loaded")
 
     def predict(self, pairs: List[Tuple[str, str]]) -> List[float]:
