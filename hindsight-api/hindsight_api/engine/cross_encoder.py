@@ -102,10 +102,17 @@ class LocalSTCrossEncoder(CrossEncoderModel):
 
         logger.info(f"Reranker: initializing local provider with model {self.model_name}")
         # Disable lazy loading (meta tensors) which causes issues with newer transformers/accelerate
-        # Setting low_cpu_mem_usage=False and device_map=None ensures tensors are fully materialized
+        # The issue is that newer transformers use meta tensors by default for memory efficiency,
+        # but this breaks when moving to device. We need to load weights immediately.
         self._model = CrossEncoder(
             self.model_name,
-            model_kwargs={"low_cpu_mem_usage": False, "device_map": None},
+            model_kwargs={
+                "low_cpu_mem_usage": False,
+                "device_map": None,
+            },
+            config_kwargs={
+                "torchscript": False,
+            },
         )
         logger.info("Reranker: local provider initialized")
 

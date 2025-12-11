@@ -13,6 +13,11 @@ from typing import List, Optional
 import logging
 import os
 
+# Disable meta device usage in transformers/accelerate to prevent "Cannot copy out of meta tensor" errors
+# This must be set BEFORE importing any transformers/torch modules
+os.environ.setdefault("TRANSFORMERS_NO_ADVISORY_WARNINGS", "1")
+os.environ.setdefault("HF_HUB_DISABLE_SYMLINKS_WARNING", "1")
+
 import httpx
 
 from ..config import (
@@ -107,9 +112,11 @@ class LocalSTEmbeddings(Embeddings):
         logger.info(f"Embeddings: initializing local provider with model {self.model_name}")
         # Disable lazy loading (meta tensors) which causes issues with newer transformers/accelerate
         # Setting low_cpu_mem_usage=False and device_map=None ensures tensors are fully materialized
+        # We also need to pass these through backend_kwargs for the underlying model loading
         self._model = SentenceTransformer(
             self.model_name,
             model_kwargs={"low_cpu_mem_usage": False, "device_map": None},
+            backend_kwargs={"low_cpu_mem_usage": False},
         )
 
         # Validate dimension matches database schema
