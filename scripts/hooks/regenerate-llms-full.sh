@@ -13,20 +13,18 @@ fi
 
 echo "${LOG_PREFIX}Docs changed, regenerating llms-full.txt..."
 
-# Check if npm is available and hindsight-docs exists
-if [ ! -d "hindsight-docs" ] || ! command -v npm &> /dev/null; then
-    echo "${LOG_PREFIX}Warning: Cannot regenerate llms-full.txt (missing hindsight-docs or npm)"
+# Check if uv is available
+if ! command -v uv &> /dev/null; then
+    echo "${LOG_PREFIX}Warning: Cannot regenerate llms-full.txt (uv not found)"
     exit 0
 fi
 
-cd hindsight-docs
-
 # Run the generate script
-if npm run generate-llms --silent 2>/dev/null; then
+if uv run generate-llms-full 2>/dev/null; then
     # Check if llms-full.txt changed
-    if [ -n "$(git diff --name-only -- static/llms-full.txt 2>/dev/null)" ]; then
+    if [ -n "$(git diff --name-only -- hindsight-docs/static/llms-full.txt 2>/dev/null)" ]; then
         echo "${LOG_PREFIX}llms-full.txt updated, staging..."
-        git add static/llms-full.txt
+        git add hindsight-docs/static/llms-full.txt
     else
         echo "${LOG_PREFIX}llms-full.txt unchanged"
     fi
