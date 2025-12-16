@@ -3,7 +3,7 @@
 > Agent Memory that Works Like Human Memory
 
 This file contains the complete Hindsight documentation for LLM consumption.
-Generated: 2025-12-16T11:21:44.700Z
+Generated: 2025-12-16T11:21:49.491Z
 
 ---
 
