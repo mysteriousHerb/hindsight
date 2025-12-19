@@ -88,13 +88,10 @@ The `document_id` groups related memories for later management.
 
 ```bash
 # Single file
-hindsight memory put-files my-bank document.txt
+hindsight memory retain-files my-bank document.txt
 
-# Multiple files
-hindsight memory put-files my-bank doc1.txt doc2.md notes.txt
-
-# With document ID
-hindsight memory put-files my-bank report.pdf --document-id "q4-report"
+# Directory (recursive by default)
+hindsight memory retain-files my-bank ./documents/
 ```
 
 </TabItem>

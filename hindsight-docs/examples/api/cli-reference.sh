@@ -15,8 +15,8 @@ DOC_ID="test-document-001"
 hindsight configure --api-url "$HINDSIGHT_URL"
 
 # Create test data with a known document ID
-hindsight memory retain "$BANK_ID" "Alice works at Google as a software engineer" --document-id "$DOC_ID"
-hindsight memory retain "$BANK_ID" "Bob is a data scientist who collaborates with Alice" --document-id "$DOC_ID"
+hindsight memory retain "$BANK_ID" "Alice works at Google as a software engineer" --doc-id "$DOC_ID"
+hindsight memory retain "$BANK_ID" "Bob is a data scientist who collaborates with Alice" --doc-id "$DOC_ID"
 hindsight memory retain "$BANK_ID" "Alice and Bob work on machine learning projects"
 
 # Wait a moment for processing
@@ -137,7 +137,7 @@ hindsight document get $BANK_ID $DOC_ID
 
 # [docs:cli-document-delete]
 # Create a temp document to delete
-hindsight memory retain $BANK_ID "Temporary content" --document-id "temp-doc-to-delete"
+hindsight memory retain $BANK_ID "Temporary content" --doc-id "temp-doc-to-delete"
 sleep 1
 hindsight document delete $BANK_ID temp-doc-to-delete
 # [/docs:cli-document-delete]

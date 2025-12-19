@@ -53,11 +53,11 @@ Associate retained content with a document:
 <TabItem value="cli" label="CLI">
 
 ```bash
-# Retain file with document ID
-hindsight retain my-bank --file notes.txt --document-id notes-2024-03-15
+# Retain content with document ID
+hindsight memory retain my-bank "Meeting notes content..." --doc-id notes-2024-03-15
 
-# Batch retain directory
-hindsight retain my-bank --files docs/*.md --document-id project-docs
+# Batch retain from files
+hindsight memory retain-files my-bank docs/
 ```
 
 </TabItem>
@@ -78,10 +78,10 @@ Re-retaining with the same document_id **replaces** the old content:
 
 ```bash
 # Original
-hindsight retain my-bank "Project deadline: March 31" --document-id project-plan
+hindsight memory retain my-bank "Project deadline: March 31" --doc-id project-plan
 
 # Update
-hindsight retain my-bank "Project deadline: April 15 (extended)" --document-id project-plan
+hindsight memory retain my-bank "Project deadline: April 15 (extended)" --doc-id project-plan
 ```
 
 </TabItem>
@@ -101,7 +101,7 @@ Retrieve a document's original text and metadata. This is useful for expanding d
 <TabItem value="cli" label="CLI">
 
 ```bash
-hindsight documents get my-bank meeting-2024-03-15
+hindsight document get my-bank meeting-2024-03-15
 ```
 
 </TabItem>

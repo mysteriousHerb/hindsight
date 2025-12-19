@@ -98,6 +98,34 @@ for (const fact of detailedResponse.based_on || []) {
 
 
 // =============================================================================
+// Doc Examples - List Memories Section
+// =============================================================================
+
+// [docs:main-list-memories]
+// List all memories in a bank
+const memories = await client.listMemories('my-bank', {
+    limit: 10
+});
+
+for (const memory of memories.items) {
+    console.log(`- [${memory.fact_type}] ${memory.text}`);
+}
+
+// Filter by type
+const worldFacts = await client.listMemories('my-bank', {
+    type: 'world',
+    limit: 5
+});
+
+// Search within memories
+const searchResults = await client.listMemories('my-bank', {
+    q: 'Alice',
+    limit: 10
+});
+// [/docs:main-list-memories]
+
+
+// =============================================================================
 // Cleanup (not shown in docs)
 // =============================================================================
 await fetch(`${HINDSIGHT_URL}/v1/default/banks/my-bank`, { method: 'DELETE' });

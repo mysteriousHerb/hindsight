@@ -118,6 +118,61 @@ for fact in response.based_on or []:
 
 
 # =============================================================================
+# Doc Examples - List Memories Section
+# =============================================================================
+
+# [docs:main-list-memories]
+# List all memories in a bank
+memories = client.list_memories(
+    bank_id="my-bank",
+    limit=10
+)
+
+for memory in memories.items:
+    print(f"- [{memory['fact_type']}] {memory['text']}")
+
+# Filter by type
+world_facts = client.list_memories(
+    bank_id="my-bank",
+    type="world",
+    limit=5
+)
+
+# Search within memories
+search_results = client.list_memories(
+    bank_id="my-bank",
+    search_query="Alice",
+    limit=10
+)
+# [/docs:main-list-memories]
+
+
+# =============================================================================
+# Doc Examples - Async Methods Section
+# =============================================================================
+
+# [docs:main-async]
+import asyncio
+
+async def async_example():
+    # Create a fresh client for async operations
+    async_client = Hindsight(base_url=HINDSIGHT_URL)
+
+    # All sync methods have async versions prefixed with 'a'
+    await async_client.aretain(bank_id="my-bank", content="Async memory")
+
+    results = await async_client.arecall(bank_id="my-bank", query="Async")
+    for r in results:
+        print(f"- {r.text}")
+
+    response = await async_client.areflect(bank_id="my-bank", query="What was stored?")
+    print(response.text)
+
+asyncio.run(async_example())
+# [/docs:main-async]
+
+
+# =============================================================================
 # Cleanup (not shown in docs)
 # =============================================================================
 requests.delete(f"{HINDSIGHT_URL}/v1/default/banks/my-bank")
