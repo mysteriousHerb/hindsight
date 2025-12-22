@@ -241,7 +241,9 @@ class MemoryEngine(MemoryEngineInterface):
         config = get_config()
 
         # Apply optimization flags from config if not explicitly provided
-        self._skip_llm_verification = skip_llm_verification if skip_llm_verification is not None else config.skip_llm_verification
+        self._skip_llm_verification = (
+            skip_llm_verification if skip_llm_verification is not None else config.skip_llm_verification
+        )
         self._lazy_reranker = lazy_reranker if lazy_reranker is not None else config.lazy_reranker
 
         # Apply defaults from config
