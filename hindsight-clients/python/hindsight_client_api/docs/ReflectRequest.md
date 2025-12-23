@@ -10,6 +10,7 @@ Name | Type | Description | Notes
 **budget** | [**Budget**](Budget.md) |  | [optional] 
 **context** | **str** |  | [optional] 
 **include** | [**ReflectIncludeOptions**](ReflectIncludeOptions.md) | Options for including additional data (disabled by default) | [optional] 
+**response_schema** | **Dict[str, object]** |  | [optional] 
 
 ## Example
 

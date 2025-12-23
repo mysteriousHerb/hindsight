@@ -173,6 +173,37 @@ class TestReflect:
         assert response.text is not None
         assert len(response.text) > 0
 
+    def test_reflect_with_structured_output(self, client, bank_id):
+        """Test reflect with structured output via response_schema.
+
+        When response_schema is provided, the response should include
+        both natural language text and a structured_output field
+        parsed according to the provided JSON schema.
+        """
+        from pydantic import BaseModel
+
+        # Define schema using Pydantic model
+        class RecommendationResponse(BaseModel):
+            recommendation: str
+            reasons: list[str]
+            confidence: str
+
+        response = client.reflect(
+            bank_id=bank_id,
+            query="What programming language should I learn for data science?",
+            response_schema=RecommendationResponse.model_json_schema(),
+        )
+
+        assert response is not None
+        assert response.text is not None
+        assert len(response.text) > 0
+
+        # Verify structured output is present and can be parsed into model
+        assert response.structured_output is not None
+        result = RecommendationResponse.model_validate(response.structured_output)
+        assert result.recommendation
+        assert isinstance(result.reasons, list)
+
 
 class TestListMemories:
     """Tests for listing memories."""

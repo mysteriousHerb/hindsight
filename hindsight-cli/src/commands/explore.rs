@@ -355,6 +355,7 @@ impl App {
                             budget: Some(query_budget),
                             context: None,
                             include: None,
+                            response_schema: None,
                         };
 
                         let result = client.reflect(&bank_id, &request, false)

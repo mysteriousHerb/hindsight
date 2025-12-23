@@ -32,7 +32,8 @@ class ReflectRequest(BaseModel):
     budget: Optional[Budget] = None
     context: Optional[StrictStr] = None
     include: Optional[ReflectIncludeOptions] = Field(default=None, description="Options for including additional data (disabled by default)")
-    __properties: ClassVar[List[str]] = ["query", "budget", "context", "include"]
+    response_schema: Optional[Dict[str, Any]] = None
+    __properties: ClassVar[List[str]] = ["query", "budget", "context", "include", "response_schema"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -81,6 +82,11 @@ class ReflectRequest(BaseModel):
         if self.context is None and "context" in self.model_fields_set:
             _dict['context'] = None
 
+        # set to None if response_schema (nullable) is None
+        # and model_fields_set contains the field
+        if self.response_schema is None and "response_schema" in self.model_fields_set:
+            _dict['response_schema'] = None
+
         return _dict
 
     @classmethod
@@ -96,7 +102,8 @@ class ReflectRequest(BaseModel):
             "query": obj.get("query"),
             "budget": obj.get("budget"),
             "context": obj.get("context"),
-            "include": ReflectIncludeOptions.from_dict(obj["include"]) if obj.get("include") is not None else None
+            "include": ReflectIncludeOptions.from_dict(obj["include"]) if obj.get("include") is not None else None,
+            "response_schema": obj.get("response_schema")
         })
         return _obj
 

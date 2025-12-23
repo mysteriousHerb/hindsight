@@ -3076,6 +3076,7 @@ Guidelines:
         *,
         budget: Budget | None = None,
         context: str | None = None,
+        response_schema: dict | None = None,
         request_context: "RequestContext",
     ) -> ReflectResult:
         """
@@ -3087,19 +3088,22 @@ Guidelines:
         3. Retrieves existing opinions (bank's formed perspectives)
         4. Uses LLM to formulate an answer
         5. Extracts and stores any new opinions formed during reflection
-        6. Returns plain text answer and the facts used
+        6. Optionally generates structured output based on response_schema
+        7. Returns plain text answer and the facts used
 
         Args:
             bank_id: bank identifier
             query: Question to answer
             budget: Budget level for memory exploration (low=100, mid=300, high=600 units)
             context: Additional context string to include in LLM prompt (not used in recall)
+            response_schema: Optional JSON Schema for structured output
 
         Returns:
             ReflectResult containing:
                 - text: Plain text answer (no markdown)
                 - based_on: Dict with 'world', 'experience', and 'opinion' fact lists (MemoryFact objects)
                 - new_opinions: List of newly formed opinions
+                - structured_output: Optional dict if response_schema was provided
         """
         # Use cached LLM config
         if self._llm_config is None:
@@ -3189,6 +3193,22 @@ Guidelines:
 
         answer_text = answer_text.strip()
 
+        # Generate structured output if schema provided
+        structured_output = None
+        if response_schema is not None:
+            structured_start = time.time()
+            try:
+                structured_output = await self._generate_structured_output(
+                    answer_text=answer_text,
+                    query=query,
+                    response_schema=response_schema,
+                )
+                structured_time = time.time() - structured_start
+                log_buffer.append(f"[REFLECT {reflect_id}] Structured output generated in {structured_time:.3f}s")
+            except Exception as e:
+                logger.warning(f"[REFLECT {reflect_id}] Failed to generate structured output: {e}")
+                # Continue without structured output - don't fail the whole request
+
         # Submit form_opinion task for background processing
         await self._task_backend.submit_task(
             {"type": "form_opinion", "bank_id": bank_id, "answer_text": answer_text, "query": query}
@@ -3205,6 +3225,7 @@ Guidelines:
             text=answer_text,
             based_on={"world": world_results, "experience": agent_results, "opinion": opinion_results},
             new_opinions=[],  # Opinions are being extracted asynchronously
+            structured_output=structured_output,
         )
 
         # Call post-operation hook if validator is configured
@@ -3225,6 +3246,47 @@ Guidelines:
                 await self._operation_validator.on_reflect_complete(result_ctx)
             except Exception as e:
                 logger.warning(f"Post-reflect hook error (non-fatal): {e}")
+
+        return result
+
+    async def _generate_structured_output(
+        self,
+        answer_text: str,
+        query: str,
+        response_schema: dict,
+    ) -> dict | None:
+        """
+        Generate structured output from the answer text using the provided JSON schema.
+
+        Args:
+            answer_text: The generated answer text to structure
+            query: The original query for context
+            response_schema: JSON Schema defining the expected output structure
+
+        Returns:
+            Parsed structured output as a dict, or None if generation fails
+        """
+
+        # Wrapper class to provide Pydantic-like interface for raw JSON schemas
+        class JsonSchemaWrapper:
+            def __init__(self, schema: dict):
+                self._schema = schema
+
+            def model_json_schema(self):
+                return self._schema
+
+        schema_wrapper = JsonSchemaWrapper(response_schema)
+
+        # Call LLM with structured output - the wrapper handles schema injection
+        result = await self._llm_config.call(
+            messages=[
+                {"role": "user", "content": f"Based on the following answer to the query \"{query}\", extract the relevant information:\n\n{answer_text}"},
+            ],
+            response_format=schema_wrapper,
+            scope="memory_reflect_structured",
+            max_completion_tokens=2000,
+            skip_validation=True,  # Return raw dict since we don't have a Pydantic model
+        )
 
         return result
 

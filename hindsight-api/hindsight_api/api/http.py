@@ -386,6 +386,14 @@ class ReflectRequest(BaseModel):
                 "budget": "low",
                 "context": "This is for a research paper on AI ethics",
                 "include": {"facts": {}},
+                "response_schema": {
+                    "type": "object",
+                    "properties": {
+                        "summary": {"type": "string"},
+                        "key_points": {"type": "array", "items": {"type": "string"}},
+                    },
+                    "required": ["summary", "key_points"],
+                },
             }
         }
     )
@@ -395,6 +403,10 @@ class ReflectRequest(BaseModel):
     context: str | None = None
     include: ReflectIncludeOptions = Field(
         default_factory=ReflectIncludeOptions, description="Options for including additional data (disabled by default)"
+    )
+    response_schema: dict | None = Field(
+        default=None,
+        description="Optional JSON Schema for structured output. When provided, the response will include a 'structured_output' field with the LLM response parsed according to this schema.",
     )
 
 
@@ -440,12 +452,20 @@ class ReflectResponse(BaseModel):
                     {"id": "123", "text": "AI is used in healthcare", "type": "world"},
                     {"id": "456", "text": "I discussed AI applications last week", "type": "experience"},
                 ],
+                "structured_output": {
+                    "summary": "AI is transformative",
+                    "key_points": ["Used in healthcare", "Discussed recently"],
+                },
             }
         }
     )
 
     text: str
     based_on: list[ReflectFact] = []  # Facts used to generate the response
+    structured_output: dict | None = Field(
+        default=None,
+        description="Structured output parsed according to the request's response_schema. Only present when response_schema was provided in the request.",
+    )
 
 
 class BanksResponse(BaseModel):
@@ -1211,6 +1231,7 @@ def _register_routes(app: FastAPI):
                     query=request.query,
                     budget=request.budget,
                     context=request.context,
+                    response_schema=request.response_schema,
                     request_context=request_context,
                 )
 
@@ -1233,6 +1254,7 @@ def _register_routes(app: FastAPI):
             return ReflectResponse(
                 text=core_result.text,
                 based_on=based_on_facts,
+                structured_output=core_result.structured_output,
             )
 
         except Exception as e:
