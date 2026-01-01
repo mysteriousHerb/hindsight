@@ -16,6 +16,8 @@ ENV_LLM_PROVIDER = "HINDSIGHT_API_LLM_PROVIDER"
 ENV_LLM_API_KEY = "HINDSIGHT_API_LLM_API_KEY"
 ENV_LLM_MODEL = "HINDSIGHT_API_LLM_MODEL"
 ENV_LLM_BASE_URL = "HINDSIGHT_API_LLM_BASE_URL"
+ENV_LLM_MAX_CONCURRENT = "HINDSIGHT_API_LLM_MAX_CONCURRENT"
+ENV_LLM_TIMEOUT = "HINDSIGHT_API_LLM_TIMEOUT"
 
 ENV_EMBEDDINGS_PROVIDER = "HINDSIGHT_API_EMBEDDINGS_PROVIDER"
 ENV_EMBEDDINGS_LOCAL_MODEL = "HINDSIGHT_API_EMBEDDINGS_LOCAL_MODEL"
@@ -33,6 +35,10 @@ ENV_GRAPH_RETRIEVER = "HINDSIGHT_API_GRAPH_RETRIEVER"
 ENV_MCP_LOCAL_BANK_ID = "HINDSIGHT_API_MCP_LOCAL_BANK_ID"
 ENV_MCP_INSTRUCTIONS = "HINDSIGHT_API_MCP_INSTRUCTIONS"
 
+# Observation thresholds
+ENV_OBSERVATION_MIN_FACTS = "HINDSIGHT_API_OBSERVATION_MIN_FACTS"
+ENV_OBSERVATION_TOP_ENTITIES = "HINDSIGHT_API_OBSERVATION_TOP_ENTITIES"
+
 # Optimization flags
 ENV_SKIP_LLM_VERIFICATION = "HINDSIGHT_API_SKIP_LLM_VERIFICATION"
 ENV_LAZY_RERANKER = "HINDSIGHT_API_LAZY_RERANKER"
@@ -41,6 +47,8 @@ ENV_LAZY_RERANKER = "HINDSIGHT_API_LAZY_RERANKER"
 DEFAULT_DATABASE_URL = "pg0"
 DEFAULT_LLM_PROVIDER = "openai"
 DEFAULT_LLM_MODEL = "gpt-5-mini"
+DEFAULT_LLM_MAX_CONCURRENT = 32
+DEFAULT_LLM_TIMEOUT = 120.0  # seconds
 
 DEFAULT_EMBEDDINGS_PROVIDER = "local"
 DEFAULT_EMBEDDINGS_LOCAL_MODEL = "BAAI/bge-small-en-v1.5"
@@ -54,6 +62,10 @@ DEFAULT_LOG_LEVEL = "info"
 DEFAULT_MCP_ENABLED = True
 DEFAULT_GRAPH_RETRIEVER = "bfs"  # Options: "bfs", "mpfp"
 DEFAULT_MCP_LOCAL_BANK_ID = "mcp"
+
+# Observation thresholds
+DEFAULT_OBSERVATION_MIN_FACTS = 5  # Min facts required to generate entity observations
+DEFAULT_OBSERVATION_TOP_ENTITIES = 5  # Max entities to process per retain batch
 
 # Default MCP tool descriptions (can be customized via env vars)
 DEFAULT_MCP_RETAIN_DESCRIPTION = """Store important information to long-term memory.
@@ -91,6 +103,8 @@ class HindsightConfig:
     llm_api_key: str | None
     llm_model: str
     llm_base_url: str | None
+    llm_max_concurrent: int
+    llm_timeout: float
 
     # Embeddings
     embeddings_provider: str
@@ -111,6 +125,10 @@ class HindsightConfig:
     # Recall
     graph_retriever: str
 
+    # Observation thresholds
+    observation_min_facts: int
+    observation_top_entities: int
+
     # Optimization flags
     skip_llm_verification: bool
     lazy_reranker: bool
@@ -126,6 +144,8 @@ class HindsightConfig:
             llm_api_key=os.getenv(ENV_LLM_API_KEY),
             llm_model=os.getenv(ENV_LLM_MODEL, DEFAULT_LLM_MODEL),
             llm_base_url=os.getenv(ENV_LLM_BASE_URL) or None,
+            llm_max_concurrent=int(os.getenv(ENV_LLM_MAX_CONCURRENT, str(DEFAULT_LLM_MAX_CONCURRENT))),
+            llm_timeout=float(os.getenv(ENV_LLM_TIMEOUT, str(DEFAULT_LLM_TIMEOUT))),
             # Embeddings
             embeddings_provider=os.getenv(ENV_EMBEDDINGS_PROVIDER, DEFAULT_EMBEDDINGS_PROVIDER),
             embeddings_local_model=os.getenv(ENV_EMBEDDINGS_LOCAL_MODEL, DEFAULT_EMBEDDINGS_LOCAL_MODEL),
@@ -144,6 +164,9 @@ class HindsightConfig:
             # Optimization flags
             skip_llm_verification=os.getenv(ENV_SKIP_LLM_VERIFICATION, "false").lower() == "true",
             lazy_reranker=os.getenv(ENV_LAZY_RERANKER, "false").lower() == "true",
+            # Observation thresholds
+            observation_min_facts=int(os.getenv(ENV_OBSERVATION_MIN_FACTS, str(DEFAULT_OBSERVATION_MIN_FACTS))),
+            observation_top_entities=int(os.getenv(ENV_OBSERVATION_TOP_ENTITIES, str(DEFAULT_OBSERVATION_TOP_ENTITIES))),
         )
 
     def get_llm_base_url(self) -> str:
@@ -156,6 +179,8 @@ class HindsightConfig:
             return "https://api.groq.com/openai/v1"
         elif provider == "ollama":
             return "http://localhost:11434/v1"
+        elif provider == "lmstudio":
+            return "http://localhost:1234/v1"
         else:
             return ""
 
