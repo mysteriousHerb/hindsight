@@ -14,6 +14,8 @@ from typing import Any
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query
 
+from hindsight_api.extensions import AuthenticationError
+
 
 def _parse_metadata(metadata: Any) -> dict[str, Any]:
     """Parse metadata that may be a dict, JSON string, or None."""
@@ -35,7 +37,7 @@ from hindsight_api import MemoryEngine
 from hindsight_api.engine.db_utils import acquire_with_retry
 from hindsight_api.engine.memory_engine import Budget, fq_table
 from hindsight_api.engine.response_models import VALID_RECALL_FACT_TYPES
-from hindsight_api.extensions import HttpExtension, load_extension
+from hindsight_api.extensions import HttpExtension, OperationValidationError, load_extension
 from hindsight_api.metrics import create_metrics_collector, get_metrics_collector, initialize_metrics
 from hindsight_api.models import RequestContext
 
@@ -1014,6 +1016,8 @@ def _register_routes(app: FastAPI):
         try:
             data = await app.state.memory.get_graph_data(bank_id, type, request_context=request_context)
             return data
+        except HTTPException:
+            raise
         except Exception as e:
             import traceback
 
@@ -1060,6 +1064,8 @@ def _register_routes(app: FastAPI):
                 request_context=request_context,
             )
             return data
+        except HTTPException:
+            raise
         except Exception as e:
             import traceback
 
@@ -1176,6 +1182,10 @@ def _register_routes(app: FastAPI):
             )
         except HTTPException:
             raise
+        except OperationValidationError as e:
+            raise HTTPException(status_code=e.status_code, detail=e.reason)
+        except HTTPException:
+            raise
         except Exception as e:
             import traceback
 
@@ -1235,6 +1245,10 @@ def _register_routes(app: FastAPI):
                 based_on=based_on_facts,
             )
 
+        except OperationValidationError as e:
+            raise HTTPException(status_code=e.status_code, detail=e.reason)
+        except HTTPException:
+            raise
         except Exception as e:
             import traceback
 
@@ -1255,6 +1269,8 @@ def _register_routes(app: FastAPI):
         try:
             banks = await app.state.memory.list_banks(request_context=request_context)
             return BankListResponse(banks=banks)
+        except HTTPException:
+            raise
         except Exception as e:
             import traceback
 
@@ -1378,6 +1394,8 @@ def _register_routes(app: FastAPI):
                     failed_operations=failed_operations,
                 )
 
+        except HTTPException:
+            raise
         except Exception as e:
             import traceback
 
@@ -1402,6 +1420,8 @@ def _register_routes(app: FastAPI):
         try:
             entities = await app.state.memory.list_entities(bank_id, limit=limit, request_context=request_context)
             return EntityListResponse(items=[EntityListItem(**e) for e in entities])
+        except HTTPException:
+            raise
         except Exception as e:
             import traceback
 
@@ -1530,6 +1550,8 @@ def _register_routes(app: FastAPI):
                 bank_id=bank_id, search_query=q, limit=limit, offset=offset, request_context=request_context
             )
             return data
+        except HTTPException:
+            raise
         except Exception as e:
             import traceback
 
@@ -1658,6 +1680,8 @@ def _register_routes(app: FastAPI):
                 bank_id=bank_id,
                 operations=[OperationResponse(**op) for op in operations],
             )
+        except HTTPException:
+            raise
         except Exception as e:
             import traceback
 
@@ -1688,6 +1712,8 @@ def _register_routes(app: FastAPI):
             return CancelOperationResponse(**result)
         except ValueError as e:
             raise HTTPException(status_code=404, detail=str(e))
+        except HTTPException:
+            raise
         except Exception as e:
             import traceback
 
@@ -1719,6 +1745,8 @@ def _register_routes(app: FastAPI):
                 disposition=DispositionTraits(**disposition_dict),
                 background=profile["background"],
             )
+        except HTTPException:
+            raise
         except Exception as e:
             import traceback
 
@@ -1757,6 +1785,8 @@ def _register_routes(app: FastAPI):
                 disposition=DispositionTraits(**disposition_dict),
                 background=profile["background"],
             )
+        except HTTPException:
+            raise
         except Exception as e:
             import traceback
 
@@ -1786,6 +1816,8 @@ def _register_routes(app: FastAPI):
                 response.disposition = DispositionTraits(**result["disposition"])
 
             return response
+        except HTTPException:
+            raise
         except Exception as e:
             import traceback
 
@@ -1837,6 +1869,8 @@ def _register_routes(app: FastAPI):
                 disposition=DispositionTraits(**disposition_dict),
                 background=final_profile["background"],
             )
+        except HTTPException:
+            raise
         except Exception as e:
             import traceback
 
@@ -1864,6 +1898,8 @@ def _register_routes(app: FastAPI):
                 + result.get("entities_deleted", 0)
                 + result.get("documents_deleted", 0),
             )
+        except HTTPException:
+            raise
         except Exception as e:
             import traceback
 
@@ -1938,6 +1974,8 @@ def _register_routes(app: FastAPI):
                 return RetainResponse.model_validate(
                     {"success": True, "bank_id": bank_id, "items_count": len(contents), "async": False}
                 )
+        except OperationValidationError as e:
+            raise HTTPException(status_code=e.status_code, detail=e.reason)
         except Exception as e:
             import traceback
 
@@ -1976,6 +2014,8 @@ def _register_routes(app: FastAPI):
             await app.state.memory.delete_bank(bank_id, fact_type=type, request_context=request_context)
 
             return DeleteResponse(success=True)
+        except HTTPException:
+            raise
         except Exception as e:
             import traceback
 

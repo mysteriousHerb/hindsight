@@ -372,7 +372,7 @@ class MemoryEngine(MemoryEngineInterface):
 
         result = await validation_coro
         if not result.allowed:
-            raise OperationValidationError(result.reason or "Operation not allowed")
+            raise OperationValidationError(result.reason or "Operation not allowed", result.status_code)
 
     async def _authenticate_tenant(self, request_context: "RequestContext | None") -> str:
         """
@@ -394,12 +394,18 @@ class MemoryEngine(MemoryEngineInterface):
             _current_schema.set("public")
             return "public"
 
+        from fastapi import HTTPException
+
         from hindsight_api.extensions import AuthenticationError
 
         if request_context is None:
-            raise AuthenticationError("RequestContext is required when tenant extension is configured")
+            raise HTTPException(status_code=401, detail="Authentication failed: API key required")
 
-        tenant_context = await self._tenant_extension.authenticate(request_context)
+        try:
+            tenant_context = await self._tenant_extension.authenticate(request_context)
+        except AuthenticationError as e:
+            raise HTTPException(status_code=401, detail=str(e))
+
         _current_schema.set(tenant_context.schema_name)
         return tenant_context.schema_name
 
