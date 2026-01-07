@@ -60,30 +60,35 @@ async def _backup(database_url: str, output_path: Path, schema: str = "public") 
             "tables": tables,
         }
 
-        with zipfile.ZipFile(output_path, "w", zipfile.ZIP_DEFLATED) as zf:
-            for i, table in enumerate(BACKUP_TABLES, 1):
-                typer.echo(f"  [{i}/{len(BACKUP_TABLES)}] Backing up {table}...", nl=False)
+        # Use a transaction with REPEATABLE READ isolation to get a consistent
+        # snapshot across all tables. This prevents race conditions where
+        # entity_cooccurrences could reference entities created after the
+        # entities table was backed up.
+        async with conn.transaction(isolation="repeatable_read"):
+            with zipfile.ZipFile(output_path, "w", zipfile.ZIP_DEFLATED) as zf:
+                for i, table in enumerate(BACKUP_TABLES, 1):
+                    typer.echo(f"  [{i}/{len(BACKUP_TABLES)}] Backing up {table}...", nl=False)
 
-                buffer = io.BytesIO()
+                    buffer = io.BytesIO()
 
-                # Use binary COPY for exact type preservation
-                # asyncpg requires schema_name as separate parameter
-                await conn.copy_from_table(table, schema_name=schema, output=buffer, format="binary")
+                    # Use binary COPY for exact type preservation
+                    # asyncpg requires schema_name as separate parameter
+                    await conn.copy_from_table(table, schema_name=schema, output=buffer, format="binary")
 
-                data = buffer.getvalue()
-                zf.writestr(f"{table}.bin", data)
+                    data = buffer.getvalue()
+                    zf.writestr(f"{table}.bin", data)
 
-                # Get row count for manifest
-                qualified_table = _fq_table(table, schema)
-                row_count = await conn.fetchval(f"SELECT COUNT(*) FROM {qualified_table}")
-                tables[table] = {
-                    "rows": row_count,
-                    "size_bytes": len(data),
-                }
+                    # Get row count for manifest
+                    qualified_table = _fq_table(table, schema)
+                    row_count = await conn.fetchval(f"SELECT COUNT(*) FROM {qualified_table}")
+                    tables[table] = {
+                        "rows": row_count,
+                        "size_bytes": len(data),
+                    }
 
-                typer.echo(f" {row_count} rows")
+                    typer.echo(f" {row_count} rows")
 
-            zf.writestr("manifest.json", json.dumps(manifest, indent=2))
+                zf.writestr("manifest.json", json.dumps(manifest, indent=2))
 
         return manifest
     finally:
@@ -100,30 +105,33 @@ async def _restore(database_url: str, input_path: Path, schema: str = "public") 
             if manifest.get("version") != MANIFEST_VERSION:
                 raise ValueError(f"Unsupported backup version: {manifest.get('version')}")
 
-            typer.echo("  Clearing existing data...")
-            # Truncate tables in reverse order (respects FK constraints)
-            for table in reversed(BACKUP_TABLES):
-                qualified_table = _fq_table(table, schema)
-                await conn.execute(f"TRUNCATE TABLE {qualified_table} CASCADE")
+            # Use a transaction for atomic restore - either all tables are
+            # restored or none are, preventing partial/inconsistent state.
+            async with conn.transaction():
+                typer.echo("  Clearing existing data...")
+                # Truncate tables in reverse order (respects FK constraints)
+                for table in reversed(BACKUP_TABLES):
+                    qualified_table = _fq_table(table, schema)
+                    await conn.execute(f"TRUNCATE TABLE {qualified_table} CASCADE")
 
-            # Restore tables in forward order
-            for i, table in enumerate(BACKUP_TABLES, 1):
-                filename = f"{table}.bin"
-                if filename not in zf.namelist():
-                    typer.echo(f"  [{i}/{len(BACKUP_TABLES)}] {table}: skipped (not in backup)")
-                    continue
+                # Restore tables in forward order
+                for i, table in enumerate(BACKUP_TABLES, 1):
+                    filename = f"{table}.bin"
+                    if filename not in zf.namelist():
+                        typer.echo(f"  [{i}/{len(BACKUP_TABLES)}] {table}: skipped (not in backup)")
+                        continue
 
-                expected_rows = manifest["tables"].get(table, {}).get("rows", "?")
-                typer.echo(f"  [{i}/{len(BACKUP_TABLES)}] Restoring {table}... {expected_rows} rows")
+                    expected_rows = manifest["tables"].get(table, {}).get("rows", "?")
+                    typer.echo(f"  [{i}/{len(BACKUP_TABLES)}] Restoring {table}... {expected_rows} rows")
 
-                data = zf.read(filename)
-                buffer = io.BytesIO(data)
-                # asyncpg requires schema_name as separate parameter
-                await conn.copy_to_table(table, schema_name=schema, source=buffer, format="binary")
+                    data = zf.read(filename)
+                    buffer = io.BytesIO(data)
+                    # asyncpg requires schema_name as separate parameter
+                    await conn.copy_to_table(table, schema_name=schema, source=buffer, format="binary")
 
-            # Refresh materialized view
-            typer.echo("  Refreshing materialized views...")
-            await conn.execute(f"REFRESH MATERIALIZED VIEW {_fq_table('memory_units_bm25', schema)}")
+                # Refresh materialized view
+                typer.echo("  Refreshing materialized views...")
+                await conn.execute(f"REFRESH MATERIALIZED VIEW {_fq_table('memory_units_bm25', schema)}")
 
         return manifest
     finally:
