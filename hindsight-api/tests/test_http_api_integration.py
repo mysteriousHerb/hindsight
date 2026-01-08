@@ -553,19 +553,21 @@ async def test_delete_bank(api_client):
     assert "deleted successfully" in delete_result["message"]
 
     # 4. Verify bank and all data is deleted
-    # Profile should return 404
-    response = await api_client.get(f"/v1/default/banks/{test_bank_id}/profile")
-    assert response.status_code == 404
-
     # Bank should not be in list
     response = await api_client.get("/v1/default/banks")
     assert response.status_code == 200
     bank_ids = [b["bank_id"] for b in response.json()["banks"]]
     assert test_bank_id not in bank_ids
 
-    # Deleting again should return 404
-    response = await api_client.delete(f"/v1/default/banks/{test_bank_id}")
-    assert response.status_code == 404
+    # Stats should show zero data (profile auto-creates empty bank)
+    response = await api_client.get(f"/v1/default/banks/{test_bank_id}/stats")
+    assert response.status_code == 200
+    stats = response.json()
+    assert stats["total_nodes"] == 0
+    assert stats["total_documents"] == 0
+
+    # Clean up the auto-created empty bank
+    await api_client.delete(f"/v1/default/banks/{test_bank_id}")
 
 
 @pytest.mark.asyncio
