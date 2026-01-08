@@ -200,18 +200,7 @@ def create_mcp_server(memory: MemoryEngine) -> FastMCP:
         """
         try:
             banks = await memory.list_banks(request_context=RequestContext())
-            # Convert datetime objects for JSON serialization
-            banks_serializable = []
-            for bank in banks:
-                bank_dict = dict(bank)
-                if "created_at" in bank_dict and bank_dict["created_at"]:
-                    bank_dict["created_at"] = bank_dict["created_at"].isoformat()
-                if "updated_at" in bank_dict and bank_dict["updated_at"]:
-                    bank_dict["updated_at"] = bank_dict["updated_at"].isoformat()
-                if "disposition" in bank_dict and hasattr(bank_dict["disposition"], "model_dump"):
-                    bank_dict["disposition"] = bank_dict["disposition"].model_dump()
-                banks_serializable.append(bank_dict)
-            return json.dumps(banks_serializable, indent=2)
+            return json.dumps({"banks": banks}, indent=2)
         except Exception as e:
             logger.error(f"Error listing banks: {e}", exc_info=True)
             return f'{{"error": "{e}", "banks": []}}'
@@ -244,16 +233,7 @@ def create_mcp_server(memory: MemoryEngine) -> FastMCP:
                 # Fetch updated profile
                 profile = await memory.get_bank_profile(bank_id, request_context=RequestContext())
 
-            # Convert for JSON
-            result = {
-                "bank_id": bank_id,
-                "name": profile.get("name"),
-                "background": profile.get("background"),
-                "disposition": profile["disposition"].model_dump()
-                if hasattr(profile["disposition"], "model_dump")
-                else dict(profile["disposition"]),
-            }
-            return json.dumps(result, indent=2)
+            return json.dumps(profile, indent=2)
         except Exception as e:
             logger.error(f"Error creating bank: {e}", exc_info=True)
             return f'{{"error": "{e}"}}'
