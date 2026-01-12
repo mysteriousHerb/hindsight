@@ -1992,7 +1992,7 @@ class MemoryEngine(MemoryEngineInterface):
                 merged_candidates = merged_candidates[:reranker_max_candidates]
 
             # Rerank using cross-encoder
-            scored_results = reranker_instance.rerank(query, merged_candidates)
+            scored_results = await reranker_instance.rerank(query, merged_candidates)
 
             step_duration = time.time() - step_start
             pre_filter_note = f" (pre-filtered {pre_filtered_count})" if pre_filtered_count > 0 else ""
