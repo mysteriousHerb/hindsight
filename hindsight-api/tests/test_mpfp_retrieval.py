@@ -247,17 +247,21 @@ class TestMPFPTraverseAsync:
 
         seeds = [SeedNode("seed-1", 1.0)]
 
-        # Mock edge loading (returns all edge types at once)
-        async def mock_load_all_edges(pool, node_ids):
-            if "seed-1" in node_ids:
-                return {
-                    "semantic": {
-                        "seed-1": [
-                            EdgeTarget("neighbor-1", 0.8),
-                            EdgeTarget("neighbor-2", 0.4),
-                        ]
-                    }
+        # Pre-populate cache with seed edges (mimics pre-warming in retrieve())
+        cache.add_all_edges(
+            {
+                "semantic": {
+                    "seed-1": [
+                        EdgeTarget("neighbor-1", 0.8),
+                        EdgeTarget("neighbor-2", 0.4),
+                    ]
                 }
+            },
+            ["seed-1"],
+        )
+
+        # Mock for loading neighbor edges (after hop 0)
+        async def mock_load_all_edges(pool, node_ids, top_k=20):
             return {}
 
         with patch(
@@ -291,11 +295,15 @@ class TestMPFPTraverseAsync:
 
         seeds = [SeedNode("seed-1", 1.0)]
 
-        # Mock edge loading for two hops (returns all edge types at once)
-        async def mock_load_all_edges(pool, node_ids):
+        # Pre-populate cache with seed edges (mimics pre-warming in retrieve())
+        cache.add_all_edges(
+            {"semantic": {"seed-1": [EdgeTarget("hop1-node", 1.0)]}},
+            ["seed-1"],
+        )
+
+        # Mock edge loading for hop 1 nodes
+        async def mock_load_all_edges(pool, node_ids, top_k=20):
             edges: dict[str, dict[str, list[EdgeTarget]]] = {"semantic": {}}
-            if "seed-1" in node_ids:
-                edges["semantic"]["seed-1"] = [EdgeTarget("hop1-node", 1.0)]
             if "hop1-node" in node_ids:
                 edges["semantic"]["hop1-node"] = [EdgeTarget("hop2-node", 1.0)]
             return edges
@@ -319,12 +327,17 @@ class TestMPFPTraverseAsync:
 
     @pytest.mark.asyncio
     async def test_cache_reuse(self):
-        """Cache should prevent redundant edge loading."""
+        """Cache should prevent redundant edge loading for already-cached nodes."""
         cache = EdgeCache()
         config = MPFPConfig(alpha=0.15, threshold=1e-6)
 
-        # Pre-load cache (marks seed-1 as fully loaded)
-        cache.add_all_edges({"semantic": {"seed-1": [EdgeTarget("neighbor-1", 1.0)]}}, ["seed-1"])
+        # Pre-load cache (marks seed-1 AND neighbor-1 as fully loaded)
+        # neighbor-1 is also cached because after hop 0, the frontier contains neighbor-1
+        # and the algorithm tries to pre-warm edges for the next hop
+        cache.add_all_edges(
+            {"semantic": {"seed-1": [EdgeTarget("neighbor-1", 1.0)], "neighbor-1": []}},
+            ["seed-1", "neighbor-1"],
+        )
 
         seeds = [SeedNode("seed-1", 1.0)]
 
@@ -342,7 +355,7 @@ class TestMPFPTraverseAsync:
                 cache=cache,
             )
 
-        # Should not call load_all_edges_for_frontier since seed-1 is already cached
+        # Should not call load_all_edges_for_frontier since all nodes are already cached
         load_mock.assert_not_called()
 
 
@@ -356,7 +369,9 @@ class TestMPFPGraphRetriever:
 
     def test_default_config(self):
         """Default config should have expected patterns."""
-        retriever = MPFPGraphRetriever()
+        # Use explicit config to avoid global config dependency
+        config = MPFPConfig()
+        retriever = MPFPGraphRetriever(config=config)
 
         assert len(retriever.config.patterns_semantic) > 0
         assert len(retriever.config.patterns_temporal) > 0
@@ -398,7 +413,9 @@ class TestMPFPGraphRetriever:
     @pytest.mark.asyncio
     async def test_retrieve_no_seeds_returns_empty(self):
         """Retrieve with no seeds should return empty results."""
-        retriever = MPFPGraphRetriever()
+        # Use explicit config to avoid global config dependency
+        config = MPFPConfig()
+        retriever = MPFPGraphRetriever(config=config)
 
         # Mock _find_semantic_seeds to return empty
         with patch.object(retriever, "_find_semantic_seeds", new_callable=AsyncMock, return_value=[]):
@@ -417,15 +434,18 @@ class TestMPFPGraphRetriever:
     @pytest.mark.asyncio
     async def test_retrieve_with_semantic_seeds(self):
         """Retrieve with semantic seeds should run patterns and return results."""
-        retriever = MPFPGraphRetriever()
+        # Use explicit config to avoid global config dependency
+        config = MPFPConfig()
+        retriever = MPFPGraphRetriever(config=config)
 
         semantic_seeds = [
             RetrievalResult(id="seed-1", text="seed text", fact_type="world", similarity=0.9),
         ]
 
         # Mock the internal functions
+        # mpfp_traverse_hop_synchronized returns a list of PatternResult (one per pattern)
         async def mock_traverse(*args, **kwargs):
-            return PatternResult(pattern=["semantic"], scores={"seed-1": 0.5, "result-1": 0.3})
+            return [PatternResult(pattern=["semantic"], scores={"seed-1": 0.5, "result-1": 0.3})]
 
         async def mock_fetch(pool, node_ids, fact_type):
             return [
@@ -435,12 +455,17 @@ class TestMPFPGraphRetriever:
 
         with (
             patch(
-                "hindsight_api.engine.search.mpfp_retrieval.mpfp_traverse_async",
+                "hindsight_api.engine.search.mpfp_retrieval.mpfp_traverse_hop_synchronized",
                 side_effect=mock_traverse,
             ),
             patch(
                 "hindsight_api.engine.search.mpfp_retrieval.fetch_memory_units_by_ids",
                 side_effect=mock_fetch,
+            ),
+            patch(
+                "hindsight_api.engine.search.mpfp_retrieval.load_all_edges_for_frontier",
+                new_callable=AsyncMock,
+                return_value={},
             ),
         ):
             results, timings = await retriever.retrieve(

@@ -253,7 +253,7 @@ For advanced authentication (JWT, OAuth, multi-tenant schemas), implement a cust
 
 #### Graph Retrieval Algorithms
 
-- **`link_expansion`** (default): Fast, simple graph expansion from semantic seeds via entity co-occurrence and causal links. Target latency <100ms. Recommended for most use cases.
+- **`link_expansion`** (default): Fast, simple graph expansion from semantic seeds via entity co-occurrence and causal links. Target latency under 100ms. Recommended for most use cases.
 - **`mpfp`**: Multi-Path Fact Propagation - iterative graph traversal with activation spreading. More thorough but slower.
 - **`bfs`**: Breadth-first search from seed facts. Simple but less effective for large graphs.
 
