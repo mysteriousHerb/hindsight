@@ -37,6 +37,7 @@ from hindsight_api import MemoryEngine
 from hindsight_api.engine.db_utils import acquire_with_retry
 from hindsight_api.engine.memory_engine import Budget, fq_table
 from hindsight_api.engine.response_models import VALID_RECALL_FACT_TYPES, TokenUsage
+from hindsight_api.engine.search.tags import TagsMatch
 from hindsight_api.extensions import HttpExtension, OperationValidationError, load_extension
 from hindsight_api.metrics import create_metrics_collector, get_metrics_collector, initialize_metrics
 from hindsight_api.models import RequestContext
@@ -81,6 +82,8 @@ class RecallRequest(BaseModel):
                 "trace": True,
                 "query_timestamp": "2023-05-30T23:40:00",
                 "include": {"entities": {"max_tokens": 500}},
+                "tags": ["user_a"],
+                "tags_match": "any",
             }
         }
     )
@@ -98,6 +101,15 @@ class RecallRequest(BaseModel):
     include: IncludeOptions = Field(
         default_factory=IncludeOptions,
         description="Options for including additional data (entities are included by default)",
+    )
+    tags: list[str] | None = Field(
+        default=None,
+        description="Filter memories by tags. If not specified, all memories are returned.",
+    )
+    tags_match: TagsMatch = Field(
+        default="any",
+        description="How to match tags: 'any' returns memories matching ANY tag (OR), "
+        "'all' returns memories matching ALL tags (AND).",
     )
 
 
@@ -119,6 +131,7 @@ class RecallResult(BaseModel):
                 "document_id": "session_abc123",
                 "metadata": {"source": "slack"},
                 "chunk_id": "456e7890-e12b-34d5-a678-901234567890",
+                "tags": ["user_a", "user_b"],
             }
         },
     }
@@ -134,6 +147,7 @@ class RecallResult(BaseModel):
     document_id: str | None = None  # Document this memory belongs to
     metadata: dict[str, str] | None = None  # User-defined metadata
     chunk_id: str | None = None  # Chunk this fact was extracted from
+    tags: list[str] | None = None  # Visibility scope tags
 
 
 class EntityObservationResponse(BaseModel):
@@ -306,6 +320,7 @@ class MemoryItem(BaseModel):
                 "metadata": {"source": "slack", "channel": "engineering"},
                 "document_id": "meeting_notes_2024_01_15",
                 "entities": [{"text": "Alice"}, {"text": "ML model", "type": "CONCEPT"}],
+                "tags": ["user_a", "user_b"],
             }
         },
     )
@@ -318,6 +333,10 @@ class MemoryItem(BaseModel):
     entities: list[EntityInput] | None = Field(
         default=None,
         description="Optional entities to combine with auto-extracted entities.",
+    )
+    tags: list[str] | None = Field(
+        default=None,
+        description="Optional tags for visibility scoping. Memories with tags can be filtered during recall.",
     )
 
     @field_validator("timestamp", mode="before")
@@ -353,6 +372,7 @@ class RetainRequest(BaseModel):
                     },
                 ],
                 "async": False,
+                "document_tags": ["user_a", "user_b"],
             }
         }
     )
@@ -362,6 +382,10 @@ class RetainRequest(BaseModel):
         default=False,
         alias="async",
         description="If true, process asynchronously in background. If false, wait for completion (default: false)",
+    )
+    document_tags: list[str] | None = Field(
+        default=None,
+        description="Tags applied to all items in this request. These are merged with any item-level tags.",
     )
 
 
@@ -431,6 +455,8 @@ class ReflectRequest(BaseModel):
                     },
                     "required": ["summary", "key_points"],
                 },
+                "tags": ["user_a"],
+                "tags_match": "any",
             }
         }
     )
@@ -445,6 +471,15 @@ class ReflectRequest(BaseModel):
     response_schema: dict | None = Field(
         default=None,
         description="Optional JSON Schema for structured output. When provided, the response will include a 'structured_output' field with the LLM response parsed according to this schema.",
+    )
+    tags: list[str] | None = Field(
+        default=None,
+        description="Filter memories by tags during reflection. If not specified, all memories are considered.",
+    )
+    tags_match: TagsMatch = Field(
+        default="any",
+        description="How to match tags: 'any' uses memories matching ANY tag (OR), "
+        "'all' uses memories matching ALL tags (AND).",
     )
 
 
@@ -1243,6 +1278,8 @@ def _register_routes(app: FastAPI):
                     include_chunks=include_chunks,
                     max_chunk_tokens=max_chunk_tokens,
                     request_context=request_context,
+                    tags=request.tags,
+                    tags_match=request.tags_match,
                 )
 
             # Convert core MemoryFact objects to API RecallResult objects (excluding internal metrics)
@@ -1350,6 +1387,8 @@ def _register_routes(app: FastAPI):
                     max_tokens=request.max_tokens,
                     response_schema=request.response_schema,
                     request_context=request_context,
+                    tags=request.tags,
+                    tags_match=request.tags_match,
                 )
 
             # Convert core MemoryFact objects to API ReflectFact objects if facts are requested
@@ -2096,11 +2135,15 @@ def _register_routes(app: FastAPI):
                     content_dict["document_id"] = item.document_id
                 if item.entities:
                     content_dict["entities"] = [{"text": e.text, "type": e.type or "CONCEPT"} for e in item.entities]
+                if item.tags:
+                    content_dict["tags"] = item.tags
                 contents.append(content_dict)
 
             if request.async_:
                 # Async processing: queue task and return immediately
-                result = await app.state.memory.submit_async_retain(bank_id, contents, request_context=request_context)
+                result = await app.state.memory.submit_async_retain(
+                    bank_id, contents, document_tags=request.document_tags, request_context=request_context
+                )
                 return RetainResponse.model_validate(
                     {
                         "success": True,
@@ -2114,7 +2157,11 @@ def _register_routes(app: FastAPI):
                 # Synchronous processing: wait for completion (record metrics)
                 with metrics.record_operation("retain", bank_id=bank_id, source="api"):
                     result, usage = await app.state.memory.retain_batch_async(
-                        bank_id=bank_id, contents=contents, request_context=request_context, return_usage=True
+                        bank_id=bank_id,
+                        contents=contents,
+                        document_tags=request.document_tags,
+                        request_context=request_context,
+                        return_usage=True,
                     )
 
                 return RetainResponse.model_validate(

@@ -18,6 +18,7 @@ import time
 from ..db_utils import acquire_with_retry
 from ..memory_engine import fq_table
 from .graph_retrieval import GraphRetriever
+from .tags import TagsMatch
 from .types import MPFPTimings, RetrievalResult
 
 logger = logging.getLogger(__name__)
@@ -95,6 +96,8 @@ class LinkExpansionRetriever(GraphRetriever):
         semantic_seeds: list[RetrievalResult] | None = None,
         temporal_seeds: list[RetrievalResult] | None = None,
         adjacency=None,
+        tags: list[str] | None = None,
+        tags_match: TagsMatch = "any",
     ) -> tuple[list[RetrievalResult], MPFPTimings | None]:
         """
         Retrieve facts by expanding links from seeds.
@@ -109,6 +112,7 @@ class LinkExpansionRetriever(GraphRetriever):
             semantic_seeds: Pre-computed semantic entry points
             temporal_seeds: Pre-computed temporal entry points
             adjacency: Unused, kept for interface compatibility
+            tags: Optional list of tags for visibility filtering (OR matching)
 
         Returns:
             Tuple of (results, timings)

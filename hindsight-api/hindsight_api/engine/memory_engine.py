@@ -151,6 +151,7 @@ from .retain import bank_utils, embedding_utils
 from .retain.types import RetainContentDict
 from .search import observation_utils, think_utils
 from .search.reranking import CrossEncoderReranker
+from .search.tags import TagsMatch
 from .task_backend import AsyncIOQueueBackend, NoopTaskBackend, TaskBackend
 
 
@@ -1059,6 +1060,7 @@ class MemoryEngine(MemoryEngineInterface):
         document_id: str | None = None,
         fact_type_override: str | None = None,
         confidence_score: float | None = None,
+        document_tags: list[str] | None = None,
         return_usage: bool = False,
     ):
         """
@@ -1191,6 +1193,7 @@ class MemoryEngine(MemoryEngineInterface):
                     is_first_batch=i == 1,  # Only upsert on first batch
                     fact_type_override=fact_type_override,
                     confidence_score=confidence_score,
+                    document_tags=document_tags,
                 )
                 all_results.extend(sub_results)
                 total_usage = total_usage + sub_usage
@@ -1209,6 +1212,7 @@ class MemoryEngine(MemoryEngineInterface):
                 is_first_batch=True,
                 fact_type_override=fact_type_override,
                 confidence_score=confidence_score,
+                document_tags=document_tags,
             )
 
         # Call post-operation hook if validator is configured
@@ -1243,6 +1247,7 @@ class MemoryEngine(MemoryEngineInterface):
         is_first_batch: bool = True,
         fact_type_override: str | None = None,
         confidence_score: float | None = None,
+        document_tags: list[str] | None = None,
     ) -> tuple[list[list[str]], "TokenUsage"]:
         """
         Internal method for batch processing without chunking logic.
@@ -1259,6 +1264,7 @@ class MemoryEngine(MemoryEngineInterface):
             is_first_batch: Whether this is the first batch (for chunked operations, only delete on first batch)
             fact_type_override: Override fact type for all facts
             confidence_score: Confidence score for opinions
+            document_tags: Tags applied to all items in this batch
 
         Returns:
             Tuple of (unit ID lists, token usage for fact extraction)
@@ -1283,6 +1289,7 @@ class MemoryEngine(MemoryEngineInterface):
                 is_first_batch=is_first_batch,
                 fact_type_override=fact_type_override,
                 confidence_score=confidence_score,
+                document_tags=document_tags,
             )
 
     def recall(
@@ -1341,6 +1348,8 @@ class MemoryEngine(MemoryEngineInterface):
         include_chunks: bool = False,
         max_chunk_tokens: int = 8192,
         request_context: "RequestContext",
+        tags: list[str] | None = None,
+        tags_match: TagsMatch = "any",
     ) -> RecallResultModel:
         """
         Recall memories using N*4-way parallel retrieval (N fact types × 4 retrieval methods).
@@ -1366,6 +1375,8 @@ class MemoryEngine(MemoryEngineInterface):
             max_entity_tokens: Maximum tokens for entity observations (default 500)
             include_chunks: Whether to include raw chunks in the response
             max_chunk_tokens: Maximum tokens for chunks (default 8192)
+            tags: Optional list of tags for visibility filtering (OR matching - returns
+                  memories that have at least one matching tag)
 
         Returns:
             RecallResultModel containing:
@@ -1438,6 +1449,8 @@ class MemoryEngine(MemoryEngineInterface):
                         max_chunk_tokens,
                         request_context,
                         semaphore_wait=semaphore_wait,
+                        tags=tags,
+                        tags_match=tags_match,
                     )
                     break  # Success - exit retry loop
                 except Exception as e:
@@ -1556,6 +1569,8 @@ class MemoryEngine(MemoryEngineInterface):
         max_chunk_tokens: int = 8192,
         request_context: "RequestContext" = None,
         semaphore_wait: float = 0.0,
+        tags: list[str] | None = None,
+        tags_match: TagsMatch = "any",
     ) -> RecallResultModel:
         """
         Search implementation with modular retrieval and reranking.
@@ -1642,6 +1657,8 @@ class MemoryEngine(MemoryEngineInterface):
                     thinking_budget,
                     question_date,
                     self.query_analyzer,
+                    tags=tags,
+                    tags_match=tags_match,
                 )
                 parallel_duration = time.time() - parallel_start
 
@@ -3302,6 +3319,8 @@ Guidelines:
         max_tokens: int = 4096,
         response_schema: dict | None = None,
         request_context: "RequestContext",
+        tags: list[str] | None = None,
+        tags_match: TagsMatch = "any",
     ) -> ReflectResult:
         """
         Reflect and formulate an answer using bank identity, world facts, and opinions.
@@ -3369,6 +3388,8 @@ Guidelines:
                 fact_type=["experience", "world", "opinion"],
                 include_entities=True,
                 request_context=request_context,
+                tags=tags,
+                tags_match=tags_match,
             )
         recall_time = time.time() - recall_start
 
@@ -4365,6 +4386,7 @@ Guidelines:
         contents: list[dict[str, Any]],
         *,
         request_context: "RequestContext",
+        document_tags: list[str] | None = None,
     ) -> dict[str, Any]:
         """Submit a batch retain operation to run asynchronously."""
         await self._authenticate_tenant(request_context)
@@ -4388,14 +4410,16 @@ Guidelines:
             )
 
         # Submit task to background queue
-        await self._task_backend.submit_task(
-            {
-                "type": "batch_retain",
-                "operation_id": str(operation_id),
-                "bank_id": bank_id,
-                "contents": contents,
-            }
-        )
+        task_payload = {
+            "type": "batch_retain",
+            "operation_id": str(operation_id),
+            "bank_id": bank_id,
+            "contents": contents,
+        }
+        if document_tags:
+            task_payload["document_tags"] = document_tags
+
+        await self._task_backend.submit_task(task_payload)
 
         logger.info(f"Retain task queued for bank_id={bank_id}, {len(contents)} items, operation_id={operation_id}")
 

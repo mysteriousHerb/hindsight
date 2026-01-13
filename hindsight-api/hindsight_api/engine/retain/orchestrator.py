@@ -49,6 +49,7 @@ async def retain_batch(
     is_first_batch: bool = True,
     fact_type_override: str | None = None,
     confidence_score: float | None = None,
+    document_tags: list[str] | None = None,
 ) -> tuple[list[list[str]], TokenUsage]:
     """
     Process a batch of content through the retain pipeline.
@@ -67,6 +68,7 @@ async def retain_batch(
         is_first_batch: Whether this is the first batch
         fact_type_override: Override fact type for all facts
         confidence_score: Confidence score for opinions
+        document_tags: Tags applied to all items in this batch
 
     Returns:
         Tuple of (unit ID lists, token usage for fact extraction)
@@ -88,12 +90,16 @@ async def retain_batch(
     # Convert dicts to RetainContent objects
     contents = []
     for item in contents_dicts:
+        # Merge item-level tags with document-level tags
+        item_tags = item.get("tags", []) or []
+        merged_tags = list(set(item_tags + (document_tags or [])))
         content = RetainContent(
             content=item["content"],
             context=item.get("context", ""),
             event_date=item.get("event_date") or utcnow(),
             metadata=item.get("metadata", {}),
             entities=item.get("entities", []),
+            tags=merged_tags,
         )
         contents.append(content)
 

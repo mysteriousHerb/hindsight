@@ -45,6 +45,7 @@ async def insert_facts_batch(
     metadata_jsons = []
     chunk_ids = []
     document_ids = []
+    tags_list = []
 
     for fact in facts:
         fact_texts.append(fact.fact_text)
@@ -65,16 +66,31 @@ async def insert_facts_batch(
         chunk_ids.append(fact.chunk_id)
         # Use per-fact document_id if available, otherwise fallback to batch-level document_id
         document_ids.append(fact.document_id if fact.document_id else document_id)
+        # Convert tags to JSON string for proper batch insertion (PostgreSQL unnest doesn't handle 2D arrays well)
+        tags_list.append(json.dumps(fact.tags if fact.tags else []))
 
     # Batch insert all facts
+    # Note: tags are passed as JSON strings and converted back to varchar[] via jsonb_array_elements_text + array_agg
     results = await conn.fetch(
         f"""
-        INSERT INTO {fq_table("memory_units")} (bank_id, text, embedding, event_date, occurred_start, occurred_end, mentioned_at,
-                                 context, fact_type, confidence_score, access_count, metadata, chunk_id, document_id)
-        SELECT $1, * FROM unnest(
-            $2::text[], $3::vector[], $4::timestamptz[], $5::timestamptz[], $6::timestamptz[], $7::timestamptz[],
-            $8::text[], $9::text[], $10::float[], $11::int[], $12::jsonb[], $13::text[], $14::text[]
+        WITH input_data AS (
+            SELECT * FROM unnest(
+                $2::text[], $3::vector[], $4::timestamptz[], $5::timestamptz[], $6::timestamptz[], $7::timestamptz[],
+                $8::text[], $9::text[], $10::float[], $11::int[], $12::jsonb[], $13::text[], $14::text[], $15::jsonb[]
+            ) AS t(text, embedding, event_date, occurred_start, occurred_end, mentioned_at,
+                   context, fact_type, confidence_score, access_count, metadata, chunk_id, document_id, tags_json)
         )
+        INSERT INTO {fq_table("memory_units")} (bank_id, text, embedding, event_date, occurred_start, occurred_end, mentioned_at,
+                                 context, fact_type, confidence_score, access_count, metadata, chunk_id, document_id, tags)
+        SELECT
+            $1,
+            text, embedding, event_date, occurred_start, occurred_end, mentioned_at,
+            context, fact_type, confidence_score, access_count, metadata, chunk_id, document_id,
+            COALESCE(
+                (SELECT array_agg(elem) FROM jsonb_array_elements_text(tags_json) AS elem),
+                '{{}}'::varchar[]
+            )
+        FROM input_data
         RETURNING id
         """,
         bank_id,
@@ -91,6 +107,7 @@ async def insert_facts_batch(
         metadata_jsons,
         chunk_ids,
         document_ids,
+        tags_list,
     )
 
     unit_ids = [str(row["id"]) for row in results]

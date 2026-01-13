@@ -702,6 +702,12 @@ export type MemoryItem = {
    * Optional entities to combine with auto-extracted entities.
    */
   entities?: Array<EntityInput> | null;
+  /**
+   * Tags
+   *
+   * Optional tags for visibility scoping. Memories with tags can be filtered during recall.
+   */
+  tags?: Array<string> | null;
 };
 
 /**
@@ -791,6 +797,18 @@ export type RecallRequest = {
    * Options for including additional data (entities are included by default)
    */
   include?: IncludeOptions;
+  /**
+   * Tags
+   *
+   * Filter memories by tags. If not specified, all memories are returned.
+   */
+  tags?: Array<string> | null;
+  /**
+   * Tags Match
+   *
+   * How to match tags: 'any' returns memories matching ANY tag (OR), 'all' returns memories matching ALL tags (AND).
+   */
+  tags_match?: "any" | "all";
 };
 
 /**
@@ -879,6 +897,10 @@ export type RecallResult = {
    * Chunk Id
    */
   chunk_id?: string | null;
+  /**
+   * Tags
+   */
+  tags?: Array<string> | null;
 };
 
 /**
@@ -958,6 +980,18 @@ export type ReflectRequest = {
   response_schema?: {
     [key: string]: unknown;
   } | null;
+  /**
+   * Tags
+   *
+   * Filter memories by tags during reflection. If not specified, all memories are considered.
+   */
+  tags?: Array<string> | null;
+  /**
+   * Tags Match
+   *
+   * How to match tags: 'any' uses memories matching ANY tag (OR), 'all' uses memories matching ALL tags (AND).
+   */
+  tags_match?: "any" | "all";
 };
 
 /**
@@ -1004,6 +1038,12 @@ export type RetainRequest = {
    * If true, process asynchronously in background. If false, wait for completion (default: false)
    */
   async?: boolean;
+  /**
+   * Document Tags
+   *
+   * Tags applied to all items in this request. These are merged with any item-level tags.
+   */
+  document_tags?: Array<string> | null;
 };
 
 /**

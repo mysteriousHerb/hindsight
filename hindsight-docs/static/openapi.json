@@ -2821,6 +2821,21 @@
             ],
             "title": "Entities",
             "description": "Optional entities to combine with auto-extracted entities."
+          },
+          "tags": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tags",
+            "description": "Optional tags for visibility scoping. Memories with tags can be filtered during recall."
           }
         },
         "type": "object",
@@ -2846,6 +2861,10 @@
             "channel": "engineering",
             "source": "slack"
           },
+          "tags": [
+            "user_a",
+            "user_b"
+          ],
           "timestamp": "2024-01-15T10:30:00Z"
         }
       },
@@ -2999,6 +3018,31 @@
           "include": {
             "$ref": "#/components/schemas/IncludeOptions",
             "description": "Options for including additional data (entities are included by default)"
+          },
+          "tags": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tags",
+            "description": "Filter memories by tags. If not specified, all memories are returned."
+          },
+          "tags_match": {
+            "type": "string",
+            "enum": [
+              "any",
+              "all"
+            ],
+            "title": "Tags Match",
+            "description": "How to match tags: 'any' returns memories matching ANY tag (OR), 'all' returns memories matching ALL tags (AND).",
+            "default": "any"
           }
         },
         "type": "object",
@@ -3017,6 +3061,10 @@
           "max_tokens": 4096,
           "query": "What did Alice say about machine learning?",
           "query_timestamp": "2023-05-30T23:40:00",
+          "tags": [
+            "user_a"
+          ],
+          "tags_match": "any",
           "trace": true,
           "types": [
             "world",
@@ -3238,6 +3286,20 @@
               }
             ],
             "title": "Chunk Id"
+          },
+          "tags": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tags"
           }
         },
         "type": "object",
@@ -3262,6 +3324,10 @@
           },
           "occurred_end": "2024-01-15T10:30:00Z",
           "occurred_start": "2024-01-15T10:30:00Z",
+          "tags": [
+            "user_a",
+            "user_b"
+          ],
           "text": "Alice works at Google on the AI team",
           "type": "world"
         }
@@ -3404,6 +3470,31 @@
             ],
             "title": "Response Schema",
             "description": "Optional JSON Schema for structured output. When provided, the response will include a 'structured_output' field with the LLM response parsed according to this schema."
+          },
+          "tags": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tags",
+            "description": "Filter memories by tags during reflection. If not specified, all memories are considered."
+          },
+          "tags_match": {
+            "type": "string",
+            "enum": [
+              "any",
+              "all"
+            ],
+            "title": "Tags Match",
+            "description": "How to match tags: 'any' uses memories matching ANY tag (OR), 'all' uses memories matching ALL tags (AND).",
+            "default": "any"
           }
         },
         "type": "object",
@@ -3437,7 +3528,11 @@
               "key_points"
             ],
             "type": "object"
-          }
+          },
+          "tags": [
+            "user_a"
+          ],
+          "tags_match": "any"
         }
       },
       "ReflectResponse": {
@@ -3527,6 +3622,21 @@
             "title": "Async",
             "description": "If true, process asynchronously in background. If false, wait for completion (default: false)",
             "default": false
+          },
+          "document_tags": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Document Tags",
+            "description": "Tags applied to all items in this request. These are merged with any item-level tags."
           }
         },
         "type": "object",
@@ -3537,6 +3647,10 @@
         "description": "Request model for retain endpoint.",
         "example": {
           "async": false,
+          "document_tags": [
+            "user_a",
+            "user_b"
+          ],
           "items": [
             {
               "content": "Alice works at Google",
