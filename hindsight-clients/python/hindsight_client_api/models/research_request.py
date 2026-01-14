@@ -17,8 +17,8 @@ import pprint
 import re  # noqa: F401
 import json
 
-from pydantic import BaseModel, ConfigDict, Field, StrictStr
-from typing import Any, ClassVar, Dict, List
+from pydantic import BaseModel, ConfigDict, Field, StrictStr, field_validator
+from typing import Any, ClassVar, Dict, List, Optional
 from typing import Optional, Set
 from typing_extensions import Self
 
@@ -27,7 +27,19 @@ class ResearchRequest(BaseModel):
     Request model for research endpoint.
     """ # noqa: E501
     query: StrictStr = Field(description="The research question to answer")
-    __properties: ClassVar[List[str]] = ["query"]
+    tags: Optional[List[StrictStr]] = None
+    tags_match: Optional[StrictStr] = Field(default='any', description="How to match tags: 'any' (OR), 'all' (AND), or 'exact'")
+    __properties: ClassVar[List[str]] = ["query", "tags", "tags_match"]
+
+    @field_validator('tags_match')
+    def tags_match_validate_enum(cls, value):
+        """Validates the enum"""
+        if value is None:
+            return value
+
+        if value not in set(['any', 'all', 'exact']):
+            raise ValueError("must be one of enum values ('any', 'all', 'exact')")
+        return value
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -68,6 +80,11 @@ class ResearchRequest(BaseModel):
             exclude=excluded_fields,
             exclude_none=True,
         )
+        # set to None if tags (nullable) is None
+        # and model_fields_set contains the field
+        if self.tags is None and "tags" in self.model_fields_set:
+            _dict['tags'] = None
+
         return _dict
 
     @classmethod
@@ -80,7 +97,9 @@ class ResearchRequest(BaseModel):
             return cls.model_validate(obj)
 
         _obj = cls.model_validate({
-            "query": obj.get("query")
+            "query": obj.get("query"),
+            "tags": obj.get("tags"),
+            "tags_match": obj.get("tags_match") if obj.get("tags_match") is not None else 'any'
         })
         return _obj
 

@@ -1,0 +1,438 @@
+---
+sidebar_position: 6
+---
+
+# Mental Models
+
+Mental models are synthesized knowledge structures representing consolidated understanding about entities, concepts, and events. They provide quick access to pre-synthesized information without re-searching facts.
+
+import Tabs from '@theme/Tabs';
+import TabItem from '@theme/TabItem';
+
+:::info How Mental Models Work
+Learn about the four types of mental models (structural, emergent, learned, pinned) and how they're created in the [Mental Models Architecture](/developer/mental-models) guide.
+:::
+
+:::tip Prerequisites
+Make sure you've completed the [Quick Start](./quickstart) to install the client and start the server.
+:::
+
+## Creating Pinned Models
+
+Create user-defined mental models that persist across refreshes. Pinned models are ideal for tracking concepts you define upfront.
+
+<Tabs>
+<TabItem value="python" label="Python">
+
+```python
+from hindsight_client import Hindsight
+
+with Hindsight() as client:
+    model = client.create_mental_model(
+        bank_id="my-bank",
+        name="Product Roadmap",
+        description="Key product priorities and upcoming features",
+        tags=["product"]
+    )
+    print(f"Created: {model.id}")  # pinned-product-roadmap
+```
+
+</TabItem>
+<TabItem value="cli" label="CLI">
+
+```bash
+curl -X POST "http://localhost:8000/v1/default/banks/my-bank/mental-models" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Product Roadmap",
+    "description": "Key product priorities and upcoming features",
+    "tags": ["product"]
+  }'
+```
+
+</TabItem>
+</Tabs>
+
+### Request Body
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `name` | string | Yes | Human-readable name for the mental model |
+| `description` | string | Yes | One-liner description for quick scanning |
+| `tags` | array | No | Tags for scoped visibility |
+
+### Response
+
+```json
+{
+  "id": "pinned-product-roadmap",
+  "name": "Product Roadmap",
+  "type": "concept",
+  "subtype": "pinned",
+  "description": "Key product priorities and upcoming features",
+  "tags": ["product"]
+}
+```
+
+:::note
+Pinned models use the ID format `pinned-{normalized-name}`. Creating a model with the same name will return an error.
+:::
+
+## Setting a Goal
+
+Set a bank's goal to derive structural mental models. The goal describes what the agent should track.
+
+<Tabs>
+<TabItem value="python" label="Python">
+
+```python
+from hindsight_client import Hindsight
+
+with Hindsight() as client:
+    client.set_bank_goal(
+        bank_id="my-bank",
+        goal="Be a technical lead for the mobile app team"
+    )
+```
+
+</TabItem>
+<TabItem value="cli" label="CLI">
+
+```bash
+curl -X PUT "http://localhost:8000/v1/default/banks/my-bank/goal" \
+  -H "Content-Type: application/json" \
+  -d '{"goal": "Be a technical lead for the mobile app team"}'
+```
+
+</TabItem>
+</Tabs>
+
+## Listing Mental Models
+
+List all mental models for a bank with optional filtering.
+
+<Tabs>
+<TabItem value="python" label="Python">
+
+```python
+# List all mental models
+models = client.list_mental_models(bank_id="my-bank")
+for model in models:
+    print(f"{model.name}: {model.description}")
+
+# Filter by subtype
+structural = client.list_mental_models(
+    bank_id="my-bank",
+    subtype="structural"
+)
+
+# Filter by type
+entities = client.list_mental_models(
+    bank_id="my-bank",
+    type="entity"
+)
+
+# Filter by tags
+tagged = client.list_mental_models(
+    bank_id="my-bank",
+    tags=["engineering"],
+    tags_match="any"
+)
+```
+
+</TabItem>
+<TabItem value="cli" label="CLI">
+
+```bash
+# List all
+curl "http://localhost:8000/v1/default/banks/my-bank/mental-models"
+
+# Filter by subtype
+curl "http://localhost:8000/v1/default/banks/my-bank/mental-models?subtype=emergent"
+
+# Filter by type
+curl "http://localhost:8000/v1/default/banks/my-bank/mental-models?type=entity"
+
+# Filter by tags
+curl "http://localhost:8000/v1/default/banks/my-bank/mental-models?tags=engineering&tags_match=any"
+```
+
+</TabItem>
+</Tabs>
+
+### Query Parameters
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `subtype` | string | Filter by subtype: "structural", "emergent", "learned", or "pinned" |
+| `tags` | string | Comma-separated list of tags |
+| `tags_match` | string | How to match tags: "any" (default), "all", or "exact" |
+
+### Response
+
+```json
+{
+  "models": [
+    {
+      "id": "alice-chen",
+      "name": "Alice Chen",
+      "subtype": "emergent",
+      "description": "Senior ML engineer, recommendation systems expert"
+    },
+    {
+      "id": "team-members",
+      "name": "Team Members",
+      "subtype": "structural",
+      "description": "Members of the mobile app team"
+    }
+  ]
+}
+```
+
+## Getting a Mental Model
+
+Get full details of a specific mental model including its structured sections.
+
+<Tabs>
+<TabItem value="python" label="Python">
+
+```python
+model = client.get_mental_model(
+    bank_id="my-bank",
+    model_id="alice-chen"
+)
+
+print(f"Name: {model.name}")
+print(f"Description: {model.description}")
+for section in model.sections:
+    print(f"  [{section.title}]: {section.text}")
+    print(f"    Supported by facts: {section.fact_ids}")
+```
+
+</TabItem>
+<TabItem value="cli" label="CLI">
+
+```bash
+curl "http://localhost:8000/v1/default/banks/my-bank/mental-models/alice-chen"
+```
+
+</TabItem>
+</Tabs>
+
+### Response
+
+```json
+{
+  "id": "alice-chen",
+  "name": "Alice Chen",
+  "subtype": "emergent",
+  "description": "Senior ML engineer, recommendation systems expert",
+  "sections": [
+    {
+      "title": "",
+      "text": "Alice Chen is a senior machine learning engineer who joined from Google in 2023.",
+      "fact_ids": ["550e8400-e29b-41d4-a716-446655440000"]
+    },
+    {
+      "title": "Expertise",
+      "text": "Specializes in recommendation systems. Led the personalization project that improved engagement by 23%.",
+      "fact_ids": ["550e8400-e29b-41d4-a716-446655440001"]
+    },
+    {
+      "title": "Leadership",
+      "text": "Known for strong technical mentorship.",
+      "fact_ids": ["550e8400-e29b-41d4-a716-446655440002"]
+    }
+  ],
+  "entity_id": "550e8400-e29b-41d4-a716-446655440000",
+  "tags": ["engineering", "ml-team"],
+  "last_updated": "2024-01-15T10:30:00Z"
+}
+```
+
+## Refreshing Mental Models
+
+Trigger a background refresh of mental models. By default refreshes all subtypes, or specify a subtype to only refresh specific models.
+
+**For structural models:**
+- Re-derives models from the bank's goal
+
+**For emergent models:**
+- Detects candidates from frequently-mentioned entities
+- Filters candidates by goal relevance
+- Generates sections with fact attribution
+
+<Tabs>
+<TabItem value="python" label="Python">
+
+```python
+# Refresh all models
+operation = client.refresh_mental_models(
+    bank_id="my-bank",
+    tags=["engineering"]  # Optional: tags to apply to new models
+)
+
+# Refresh only structural models
+operation = client.refresh_mental_models(
+    bank_id="my-bank",
+    subtype="structural"
+)
+
+print(f"Operation ID: {operation.operation_id}")
+```
+
+</TabItem>
+<TabItem value="cli" label="CLI">
+
+```bash
+# Refresh all models
+curl -X POST "http://localhost:8000/v1/default/banks/my-bank/mental-models/refresh" \
+  -H "Content-Type: application/json" \
+  -d '{"tags": ["engineering"]}'
+
+# Refresh only emergent models
+curl -X POST "http://localhost:8000/v1/default/banks/my-bank/mental-models/refresh" \
+  -H "Content-Type: application/json" \
+  -d '{"subtype": "emergent"}'
+```
+
+</TabItem>
+</Tabs>
+
+### Request Body
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `tags` | array | Optional tags to apply to newly created mental models |
+| `subtype` | string | Optional filter: "structural" or "emergent" only |
+
+### Response
+
+```json
+{
+  "operation_id": "550e8400-e29b-41d4-a716-446655440000",
+  "message": "Refresh operation submitted"
+}
+```
+
+:::note
+Refresh requires the bank to have a goal set. The operation runs asynchronously and may take some time depending on the number of entities.
+:::
+
+## Deleting a Mental Model
+
+Delete a specific mental model.
+
+<Tabs>
+<TabItem value="python" label="Python">
+
+```python
+client.delete_mental_model(
+    bank_id="my-bank",
+    model_id="alice-chen"
+)
+```
+
+</TabItem>
+<TabItem value="cli" label="CLI">
+
+```bash
+curl -X DELETE "http://localhost:8000/v1/default/banks/my-bank/mental-models/alice-chen"
+```
+
+</TabItem>
+</Tabs>
+
+## Research
+
+Query your mental models using an agentic research interface. The agent explores available mental models and facts to answer your question.
+
+<Tabs>
+<TabItem value="python" label="Python">
+
+```python
+result = client.research(
+    bank_id="my-bank",
+    query="Who are the key people on the ML team?",
+    tags=["engineering"]  # Optional: filter mental models by tags
+)
+
+print(f"Answer: {result.answer}")
+print(f"Models used: {result.mental_models_used}")
+print(f"Facts used: {result.facts_used}")
+```
+
+</TabItem>
+<TabItem value="cli" label="CLI">
+
+```bash
+curl -X POST "http://localhost:8000/v1/default/banks/my-bank/research" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "query": "Who are the key people on the ML team?",
+    "tags": ["engineering"]
+  }'
+```
+
+</TabItem>
+</Tabs>
+
+### Request Body
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `query` | string | The question to answer |
+| `tags` | array | Optional tags to filter mental models |
+| `tags_match` | string | How to match tags: "any" (default), "all", or "exact" |
+
+### Response
+
+```json
+{
+  "answer": "The key people on the ML team are Alice Chen (senior engineer, leads recommendations), Bob Smith (data engineer, maintains pipelines), and Carol Wang (ML ops, handles deployment).",
+  "mental_models_used": ["alice-chen", "bob-smith", "carol-wang"],
+  "facts_used": ["ml team roster updated Q4", "alice promoted to senior"]
+}
+```
+
+## HTTP API Reference
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| **PUT** | `/v1/default/banks/{bank_id}/goal` | Set bank goal |
+| **POST** | `/v1/default/banks/{bank_id}/mental-models` | Create pinned model |
+| **GET** | `/v1/default/banks/{bank_id}/mental-models` | List mental models |
+| **GET** | `/v1/default/banks/{bank_id}/mental-models/{model_id}` | Get mental model |
+| **POST** | `/v1/default/banks/{bank_id}/mental-models/refresh` | Refresh all models |
+| **DELETE** | `/v1/default/banks/{bank_id}/mental-models/{model_id}` | Delete mental model |
+| **POST** | `/v1/default/banks/{bank_id}/research` | Query mental models |
+
+## Mental Model Fields
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | string | Stable identifier (derived from name) |
+| `name` | string | Human-readable name |
+| `subtype` | string | How it was created: "structural", "emergent", "learned", or "pinned" |
+| `description` | string | One-liner for quick scanning |
+| `sections` | array | Structured content with per-section fact attribution |
+| `entity_id` | string | Optional link to entities table |
+| `links` | array | Related mental model IDs |
+| `tags` | array | Tags for scoped visibility |
+| `last_updated` | string | When sections were last regenerated |
+
+### Section Structure
+
+Each section in the `sections` array contains:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `title` | string | Section header (can be empty for intro) |
+| `text` | string | Section content |
+| `fact_ids` | array | Fact IDs supporting this section |
+
+## Next Steps
+
+- [**Mental Models Architecture**](/developer/mental-models) — How mental models are created and managed
+- [**Reflect**](./reflect) — Agentic reasoning using mental models
+- [**Entities**](./entities) — The entity system that feeds emergent models

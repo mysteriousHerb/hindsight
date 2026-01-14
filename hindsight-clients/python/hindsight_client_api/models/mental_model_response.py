@@ -17,8 +17,9 @@ import pprint
 import re  # noqa: F401
 import json
 
-from pydantic import BaseModel, ConfigDict, StrictStr
+from pydantic import BaseModel, ConfigDict, Field, StrictStr
 from typing import Any, ClassVar, Dict, List, Optional
+from hindsight_client_api.models.mental_model_observation_response import MentalModelObservationResponse
 from typing import Optional, Set
 from typing_extensions import Self
 
@@ -28,18 +29,16 @@ class MentalModelResponse(BaseModel):
     """ # noqa: E501
     id: StrictStr
     bank_id: StrictStr
-    type: StrictStr
     subtype: StrictStr
     name: StrictStr
     description: StrictStr
-    summary: Optional[StrictStr] = None
+    observations: Optional[List[MentalModelObservationResponse]] = Field(default=None, description="Structured observations with per-observation fact attribution")
     entity_id: Optional[StrictStr] = None
-    source_facts: Optional[List[StrictStr]] = None
-    triggers: Optional[List[StrictStr]] = None
     links: Optional[List[StrictStr]] = None
+    tags: Optional[List[StrictStr]] = None
     last_updated: Optional[StrictStr] = None
     created_at: StrictStr
-    __properties: ClassVar[List[str]] = ["id", "bank_id", "type", "subtype", "name", "description", "summary", "entity_id", "source_facts", "triggers", "links", "last_updated", "created_at"]
+    __properties: ClassVar[List[str]] = ["id", "bank_id", "subtype", "name", "description", "observations", "entity_id", "links", "tags", "last_updated", "created_at"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -80,11 +79,13 @@ class MentalModelResponse(BaseModel):
             exclude=excluded_fields,
             exclude_none=True,
         )
-        # set to None if summary (nullable) is None
-        # and model_fields_set contains the field
-        if self.summary is None and "summary" in self.model_fields_set:
-            _dict['summary'] = None
-
+        # override the default output from pydantic by calling `to_dict()` of each item in observations (list)
+        _items = []
+        if self.observations:
+            for _item_observations in self.observations:
+                if _item_observations:
+                    _items.append(_item_observations.to_dict())
+            _dict['observations'] = _items
         # set to None if entity_id (nullable) is None
         # and model_fields_set contains the field
         if self.entity_id is None and "entity_id" in self.model_fields_set:
@@ -109,15 +110,13 @@ class MentalModelResponse(BaseModel):
         _obj = cls.model_validate({
             "id": obj.get("id"),
             "bank_id": obj.get("bank_id"),
-            "type": obj.get("type"),
             "subtype": obj.get("subtype"),
             "name": obj.get("name"),
             "description": obj.get("description"),
-            "summary": obj.get("summary"),
+            "observations": [MentalModelObservationResponse.from_dict(_item) for _item in obj["observations"]] if obj.get("observations") is not None else None,
             "entity_id": obj.get("entity_id"),
-            "source_facts": obj.get("source_facts"),
-            "triggers": obj.get("triggers"),
             "links": obj.get("links"),
+            "tags": obj.get("tags"),
             "last_updated": obj.get("last_updated"),
             "created_at": obj.get("created_at")
         })

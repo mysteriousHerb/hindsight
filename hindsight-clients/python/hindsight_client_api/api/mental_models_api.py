@@ -16,16 +16,17 @@ from pydantic import validate_call, Field, StrictFloat, StrictStr, StrictInt
 from typing import Any, Dict, List, Optional, Tuple, Union
 from typing_extensions import Annotated
 
-from pydantic import Field, StrictStr
-from typing import Any, Optional
+from pydantic import Field, StrictStr, field_validator
+from typing import List, Optional
 from typing_extensions import Annotated
 from hindsight_client_api.models.async_operation_submit_response import AsyncOperationSubmitResponse
+from hindsight_client_api.models.create_mental_model_request import CreateMentalModelRequest
 from hindsight_client_api.models.delete_response import DeleteResponse
 from hindsight_client_api.models.mental_model_list_response import MentalModelListResponse
 from hindsight_client_api.models.mental_model_response import MentalModelResponse
+from hindsight_client_api.models.refresh_mental_models_request import RefreshMentalModelsRequest
 from hindsight_client_api.models.research_request import ResearchRequest
 from hindsight_client_api.models.research_response import ResearchResponse
-from hindsight_client_api.models.set_bank_goal_request import SetBankGoalRequest
 
 from hindsight_client_api.api_client import ApiClient, RequestSerialized
 from hindsight_client_api.api_response import ApiResponse
@@ -43,6 +44,312 @@ class MentalModelsApi:
         if api_client is None:
             api_client = ApiClient.get_default()
         self.api_client = api_client
+
+
+    @validate_call
+    async def create_mental_model(
+        self,
+        bank_id: StrictStr,
+        create_mental_model_request: CreateMentalModelRequest,
+        authorization: Optional[StrictStr] = None,
+        _request_timeout: Union[
+            None,
+            Annotated[StrictFloat, Field(gt=0)],
+            Tuple[
+                Annotated[StrictFloat, Field(gt=0)],
+                Annotated[StrictFloat, Field(gt=0)]
+            ]
+        ] = None,
+        _request_auth: Optional[Dict[StrictStr, Any]] = None,
+        _content_type: Optional[StrictStr] = None,
+        _headers: Optional[Dict[StrictStr, Any]] = None,
+        _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
+    ) -> MentalModelResponse:
+        """Create mental model
+
+        Create a pinned mental model. Pinned models are user-defined and persist across refreshes.
+
+        :param bank_id: (required)
+        :type bank_id: str
+        :param create_mental_model_request: (required)
+        :type create_mental_model_request: CreateMentalModelRequest
+        :param authorization:
+        :type authorization: str
+        :param _request_timeout: timeout setting for this request. If one
+                                 number provided, it will be total request
+                                 timeout. It can also be a pair (tuple) of
+                                 (connection, read) timeouts.
+        :type _request_timeout: int, tuple(int, int), optional
+        :param _request_auth: set to override the auth_settings for an a single
+                              request; this effectively ignores the
+                              authentication in the spec for a single request.
+        :type _request_auth: dict, optional
+        :param _content_type: force content-type for the request.
+        :type _content_type: str, Optional
+        :param _headers: set to override the headers for a single
+                         request; this effectively ignores the headers
+                         in the spec for a single request.
+        :type _headers: dict, optional
+        :param _host_index: set to override the host_index for a single
+                            request; this effectively ignores the host_index
+                            in the spec for a single request.
+        :type _host_index: int, optional
+        :return: Returns the result object.
+        """ # noqa: E501
+
+        _param = self._create_mental_model_serialize(
+            bank_id=bank_id,
+            create_mental_model_request=create_mental_model_request,
+            authorization=authorization,
+            _request_auth=_request_auth,
+            _content_type=_content_type,
+            _headers=_headers,
+            _host_index=_host_index
+        )
+
+        _response_types_map: Dict[str, Optional[str]] = {
+            '200': "MentalModelResponse",
+            '422': "HTTPValidationError",
+        }
+        response_data = await self.api_client.call_api(
+            *_param,
+            _request_timeout=_request_timeout
+        )
+        await response_data.read()
+        return self.api_client.response_deserialize(
+            response_data=response_data,
+            response_types_map=_response_types_map,
+        ).data
+
+
+    @validate_call
+    async def create_mental_model_with_http_info(
+        self,
+        bank_id: StrictStr,
+        create_mental_model_request: CreateMentalModelRequest,
+        authorization: Optional[StrictStr] = None,
+        _request_timeout: Union[
+            None,
+            Annotated[StrictFloat, Field(gt=0)],
+            Tuple[
+                Annotated[StrictFloat, Field(gt=0)],
+                Annotated[StrictFloat, Field(gt=0)]
+            ]
+        ] = None,
+        _request_auth: Optional[Dict[StrictStr, Any]] = None,
+        _content_type: Optional[StrictStr] = None,
+        _headers: Optional[Dict[StrictStr, Any]] = None,
+        _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
+    ) -> ApiResponse[MentalModelResponse]:
+        """Create mental model
+
+        Create a pinned mental model. Pinned models are user-defined and persist across refreshes.
+
+        :param bank_id: (required)
+        :type bank_id: str
+        :param create_mental_model_request: (required)
+        :type create_mental_model_request: CreateMentalModelRequest
+        :param authorization:
+        :type authorization: str
+        :param _request_timeout: timeout setting for this request. If one
+                                 number provided, it will be total request
+                                 timeout. It can also be a pair (tuple) of
+                                 (connection, read) timeouts.
+        :type _request_timeout: int, tuple(int, int), optional
+        :param _request_auth: set to override the auth_settings for an a single
+                              request; this effectively ignores the
+                              authentication in the spec for a single request.
+        :type _request_auth: dict, optional
+        :param _content_type: force content-type for the request.
+        :type _content_type: str, Optional
+        :param _headers: set to override the headers for a single
+                         request; this effectively ignores the headers
+                         in the spec for a single request.
+        :type _headers: dict, optional
+        :param _host_index: set to override the host_index for a single
+                            request; this effectively ignores the host_index
+                            in the spec for a single request.
+        :type _host_index: int, optional
+        :return: Returns the result object.
+        """ # noqa: E501
+
+        _param = self._create_mental_model_serialize(
+            bank_id=bank_id,
+            create_mental_model_request=create_mental_model_request,
+            authorization=authorization,
+            _request_auth=_request_auth,
+            _content_type=_content_type,
+            _headers=_headers,
+            _host_index=_host_index
+        )
+
+        _response_types_map: Dict[str, Optional[str]] = {
+            '200': "MentalModelResponse",
+            '422': "HTTPValidationError",
+        }
+        response_data = await self.api_client.call_api(
+            *_param,
+            _request_timeout=_request_timeout
+        )
+        await response_data.read()
+        return self.api_client.response_deserialize(
+            response_data=response_data,
+            response_types_map=_response_types_map,
+        )
+
+
+    @validate_call
+    async def create_mental_model_without_preload_content(
+        self,
+        bank_id: StrictStr,
+        create_mental_model_request: CreateMentalModelRequest,
+        authorization: Optional[StrictStr] = None,
+        _request_timeout: Union[
+            None,
+            Annotated[StrictFloat, Field(gt=0)],
+            Tuple[
+                Annotated[StrictFloat, Field(gt=0)],
+                Annotated[StrictFloat, Field(gt=0)]
+            ]
+        ] = None,
+        _request_auth: Optional[Dict[StrictStr, Any]] = None,
+        _content_type: Optional[StrictStr] = None,
+        _headers: Optional[Dict[StrictStr, Any]] = None,
+        _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
+    ) -> RESTResponseType:
+        """Create mental model
+
+        Create a pinned mental model. Pinned models are user-defined and persist across refreshes.
+
+        :param bank_id: (required)
+        :type bank_id: str
+        :param create_mental_model_request: (required)
+        :type create_mental_model_request: CreateMentalModelRequest
+        :param authorization:
+        :type authorization: str
+        :param _request_timeout: timeout setting for this request. If one
+                                 number provided, it will be total request
+                                 timeout. It can also be a pair (tuple) of
+                                 (connection, read) timeouts.
+        :type _request_timeout: int, tuple(int, int), optional
+        :param _request_auth: set to override the auth_settings for an a single
+                              request; this effectively ignores the
+                              authentication in the spec for a single request.
+        :type _request_auth: dict, optional
+        :param _content_type: force content-type for the request.
+        :type _content_type: str, Optional
+        :param _headers: set to override the headers for a single
+                         request; this effectively ignores the headers
+                         in the spec for a single request.
+        :type _headers: dict, optional
+        :param _host_index: set to override the host_index for a single
+                            request; this effectively ignores the host_index
+                            in the spec for a single request.
+        :type _host_index: int, optional
+        :return: Returns the result object.
+        """ # noqa: E501
+
+        _param = self._create_mental_model_serialize(
+            bank_id=bank_id,
+            create_mental_model_request=create_mental_model_request,
+            authorization=authorization,
+            _request_auth=_request_auth,
+            _content_type=_content_type,
+            _headers=_headers,
+            _host_index=_host_index
+        )
+
+        _response_types_map: Dict[str, Optional[str]] = {
+            '200': "MentalModelResponse",
+            '422': "HTTPValidationError",
+        }
+        response_data = await self.api_client.call_api(
+            *_param,
+            _request_timeout=_request_timeout
+        )
+        return response_data.response
+
+
+    def _create_mental_model_serialize(
+        self,
+        bank_id,
+        create_mental_model_request,
+        authorization,
+        _request_auth,
+        _content_type,
+        _headers,
+        _host_index,
+    ) -> RequestSerialized:
+
+        _host = None
+
+        _collection_formats: Dict[str, str] = {
+        }
+
+        _path_params: Dict[str, str] = {}
+        _query_params: List[Tuple[str, str]] = []
+        _header_params: Dict[str, Optional[str]] = _headers or {}
+        _form_params: List[Tuple[str, str]] = []
+        _files: Dict[
+            str, Union[str, bytes, List[str], List[bytes], List[Tuple[str, bytes]]]
+        ] = {}
+        _body_params: Optional[bytes] = None
+
+        # process the path parameters
+        if bank_id is not None:
+            _path_params['bank_id'] = bank_id
+        # process the query parameters
+        # process the header parameters
+        if authorization is not None:
+            _header_params['authorization'] = authorization
+        # process the form parameters
+        # process the body parameter
+        if create_mental_model_request is not None:
+            _body_params = create_mental_model_request
+
+
+        # set the HTTP header `Accept`
+        if 'Accept' not in _header_params:
+            _header_params['Accept'] = self.api_client.select_header_accept(
+                [
+                    'application/json'
+                ]
+            )
+
+        # set the HTTP header `Content-Type`
+        if _content_type:
+            _header_params['Content-Type'] = _content_type
+        else:
+            _default_content_type = (
+                self.api_client.select_header_content_type(
+                    [
+                        'application/json'
+                    ]
+                )
+            )
+            if _default_content_type is not None:
+                _header_params['Content-Type'] = _default_content_type
+
+        # authentication setting
+        _auth_settings: List[str] = [
+        ]
+
+        return self.api_client.param_serialize(
+            method='POST',
+            resource_path='/v1/default/banks/{bank_id}/mental-models',
+            path_params=_path_params,
+            query_params=_query_params,
+            header_params=_header_params,
+            body=_body_params,
+            post_params=_form_params,
+            files=_files,
+            auth_settings=_auth_settings,
+            collection_formats=_collection_formats,
+            _host=_host,
+            _request_auth=_request_auth
+        )
+
+
 
 
     @validate_call
@@ -323,6 +630,299 @@ class MentalModelsApi:
         return self.api_client.param_serialize(
             method='DELETE',
             resource_path='/v1/default/banks/{bank_id}/mental-models/{model_id}',
+            path_params=_path_params,
+            query_params=_query_params,
+            header_params=_header_params,
+            body=_body_params,
+            post_params=_form_params,
+            files=_files,
+            auth_settings=_auth_settings,
+            collection_formats=_collection_formats,
+            _host=_host,
+            _request_auth=_request_auth
+        )
+
+
+
+
+    @validate_call
+    async def generate_mental_model(
+        self,
+        bank_id: StrictStr,
+        model_id: StrictStr,
+        authorization: Optional[StrictStr] = None,
+        _request_timeout: Union[
+            None,
+            Annotated[StrictFloat, Field(gt=0)],
+            Tuple[
+                Annotated[StrictFloat, Field(gt=0)],
+                Annotated[StrictFloat, Field(gt=0)]
+            ]
+        ] = None,
+        _request_auth: Optional[Dict[StrictStr, Any]] = None,
+        _content_type: Optional[StrictStr] = None,
+        _headers: Optional[Dict[StrictStr, Any]] = None,
+        _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
+    ) -> AsyncOperationSubmitResponse:
+        """Generate mental model content (async)
+
+        Submit a background job to generate/refresh content for a specific mental model. This is useful for newly created learned models or to regenerate content for any model.
+
+        :param bank_id: (required)
+        :type bank_id: str
+        :param model_id: (required)
+        :type model_id: str
+        :param authorization:
+        :type authorization: str
+        :param _request_timeout: timeout setting for this request. If one
+                                 number provided, it will be total request
+                                 timeout. It can also be a pair (tuple) of
+                                 (connection, read) timeouts.
+        :type _request_timeout: int, tuple(int, int), optional
+        :param _request_auth: set to override the auth_settings for an a single
+                              request; this effectively ignores the
+                              authentication in the spec for a single request.
+        :type _request_auth: dict, optional
+        :param _content_type: force content-type for the request.
+        :type _content_type: str, Optional
+        :param _headers: set to override the headers for a single
+                         request; this effectively ignores the headers
+                         in the spec for a single request.
+        :type _headers: dict, optional
+        :param _host_index: set to override the host_index for a single
+                            request; this effectively ignores the host_index
+                            in the spec for a single request.
+        :type _host_index: int, optional
+        :return: Returns the result object.
+        """ # noqa: E501
+
+        _param = self._generate_mental_model_serialize(
+            bank_id=bank_id,
+            model_id=model_id,
+            authorization=authorization,
+            _request_auth=_request_auth,
+            _content_type=_content_type,
+            _headers=_headers,
+            _host_index=_host_index
+        )
+
+        _response_types_map: Dict[str, Optional[str]] = {
+            '200': "AsyncOperationSubmitResponse",
+            '422': "HTTPValidationError",
+        }
+        response_data = await self.api_client.call_api(
+            *_param,
+            _request_timeout=_request_timeout
+        )
+        await response_data.read()
+        return self.api_client.response_deserialize(
+            response_data=response_data,
+            response_types_map=_response_types_map,
+        ).data
+
+
+    @validate_call
+    async def generate_mental_model_with_http_info(
+        self,
+        bank_id: StrictStr,
+        model_id: StrictStr,
+        authorization: Optional[StrictStr] = None,
+        _request_timeout: Union[
+            None,
+            Annotated[StrictFloat, Field(gt=0)],
+            Tuple[
+                Annotated[StrictFloat, Field(gt=0)],
+                Annotated[StrictFloat, Field(gt=0)]
+            ]
+        ] = None,
+        _request_auth: Optional[Dict[StrictStr, Any]] = None,
+        _content_type: Optional[StrictStr] = None,
+        _headers: Optional[Dict[StrictStr, Any]] = None,
+        _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
+    ) -> ApiResponse[AsyncOperationSubmitResponse]:
+        """Generate mental model content (async)
+
+        Submit a background job to generate/refresh content for a specific mental model. This is useful for newly created learned models or to regenerate content for any model.
+
+        :param bank_id: (required)
+        :type bank_id: str
+        :param model_id: (required)
+        :type model_id: str
+        :param authorization:
+        :type authorization: str
+        :param _request_timeout: timeout setting for this request. If one
+                                 number provided, it will be total request
+                                 timeout. It can also be a pair (tuple) of
+                                 (connection, read) timeouts.
+        :type _request_timeout: int, tuple(int, int), optional
+        :param _request_auth: set to override the auth_settings for an a single
+                              request; this effectively ignores the
+                              authentication in the spec for a single request.
+        :type _request_auth: dict, optional
+        :param _content_type: force content-type for the request.
+        :type _content_type: str, Optional
+        :param _headers: set to override the headers for a single
+                         request; this effectively ignores the headers
+                         in the spec for a single request.
+        :type _headers: dict, optional
+        :param _host_index: set to override the host_index for a single
+                            request; this effectively ignores the host_index
+                            in the spec for a single request.
+        :type _host_index: int, optional
+        :return: Returns the result object.
+        """ # noqa: E501
+
+        _param = self._generate_mental_model_serialize(
+            bank_id=bank_id,
+            model_id=model_id,
+            authorization=authorization,
+            _request_auth=_request_auth,
+            _content_type=_content_type,
+            _headers=_headers,
+            _host_index=_host_index
+        )
+
+        _response_types_map: Dict[str, Optional[str]] = {
+            '200': "AsyncOperationSubmitResponse",
+            '422': "HTTPValidationError",
+        }
+        response_data = await self.api_client.call_api(
+            *_param,
+            _request_timeout=_request_timeout
+        )
+        await response_data.read()
+        return self.api_client.response_deserialize(
+            response_data=response_data,
+            response_types_map=_response_types_map,
+        )
+
+
+    @validate_call
+    async def generate_mental_model_without_preload_content(
+        self,
+        bank_id: StrictStr,
+        model_id: StrictStr,
+        authorization: Optional[StrictStr] = None,
+        _request_timeout: Union[
+            None,
+            Annotated[StrictFloat, Field(gt=0)],
+            Tuple[
+                Annotated[StrictFloat, Field(gt=0)],
+                Annotated[StrictFloat, Field(gt=0)]
+            ]
+        ] = None,
+        _request_auth: Optional[Dict[StrictStr, Any]] = None,
+        _content_type: Optional[StrictStr] = None,
+        _headers: Optional[Dict[StrictStr, Any]] = None,
+        _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
+    ) -> RESTResponseType:
+        """Generate mental model content (async)
+
+        Submit a background job to generate/refresh content for a specific mental model. This is useful for newly created learned models or to regenerate content for any model.
+
+        :param bank_id: (required)
+        :type bank_id: str
+        :param model_id: (required)
+        :type model_id: str
+        :param authorization:
+        :type authorization: str
+        :param _request_timeout: timeout setting for this request. If one
+                                 number provided, it will be total request
+                                 timeout. It can also be a pair (tuple) of
+                                 (connection, read) timeouts.
+        :type _request_timeout: int, tuple(int, int), optional
+        :param _request_auth: set to override the auth_settings for an a single
+                              request; this effectively ignores the
+                              authentication in the spec for a single request.
+        :type _request_auth: dict, optional
+        :param _content_type: force content-type for the request.
+        :type _content_type: str, Optional
+        :param _headers: set to override the headers for a single
+                         request; this effectively ignores the headers
+                         in the spec for a single request.
+        :type _headers: dict, optional
+        :param _host_index: set to override the host_index for a single
+                            request; this effectively ignores the host_index
+                            in the spec for a single request.
+        :type _host_index: int, optional
+        :return: Returns the result object.
+        """ # noqa: E501
+
+        _param = self._generate_mental_model_serialize(
+            bank_id=bank_id,
+            model_id=model_id,
+            authorization=authorization,
+            _request_auth=_request_auth,
+            _content_type=_content_type,
+            _headers=_headers,
+            _host_index=_host_index
+        )
+
+        _response_types_map: Dict[str, Optional[str]] = {
+            '200': "AsyncOperationSubmitResponse",
+            '422': "HTTPValidationError",
+        }
+        response_data = await self.api_client.call_api(
+            *_param,
+            _request_timeout=_request_timeout
+        )
+        return response_data.response
+
+
+    def _generate_mental_model_serialize(
+        self,
+        bank_id,
+        model_id,
+        authorization,
+        _request_auth,
+        _content_type,
+        _headers,
+        _host_index,
+    ) -> RequestSerialized:
+
+        _host = None
+
+        _collection_formats: Dict[str, str] = {
+        }
+
+        _path_params: Dict[str, str] = {}
+        _query_params: List[Tuple[str, str]] = []
+        _header_params: Dict[str, Optional[str]] = _headers or {}
+        _form_params: List[Tuple[str, str]] = []
+        _files: Dict[
+            str, Union[str, bytes, List[str], List[bytes], List[Tuple[str, bytes]]]
+        ] = {}
+        _body_params: Optional[bytes] = None
+
+        # process the path parameters
+        if bank_id is not None:
+            _path_params['bank_id'] = bank_id
+        if model_id is not None:
+            _path_params['model_id'] = model_id
+        # process the query parameters
+        # process the header parameters
+        if authorization is not None:
+            _header_params['authorization'] = authorization
+        # process the form parameters
+        # process the body parameter
+
+
+        # set the HTTP header `Accept`
+        if 'Accept' not in _header_params:
+            _header_params['Accept'] = self.api_client.select_header_accept(
+                [
+                    'application/json'
+                ]
+            )
+
+
+        # authentication setting
+        _auth_settings: List[str] = [
+        ]
+
+        return self.api_client.param_serialize(
+            method='POST',
+            resource_path='/v1/default/banks/{bank_id}/mental-models/{model_id}/generate',
             path_params=_path_params,
             query_params=_query_params,
             header_params=_header_params,
@@ -635,8 +1235,9 @@ class MentalModelsApi:
     async def list_mental_models(
         self,
         bank_id: StrictStr,
-        subtype: Annotated[Optional[StrictStr], Field(description="Filter by subtype: structural or emergent")] = None,
-        type: Annotated[Optional[StrictStr], Field(description="Filter by type: entity, concept, or event")] = None,
+        subtype: Annotated[Optional[StrictStr], Field(description="Filter by subtype: structural, emergent, or pinned")] = None,
+        tags: Annotated[Optional[List[StrictStr]], Field(description="Filter by tags (includes untagged models)")] = None,
+        tags_match: Annotated[Optional[StrictStr], Field(description="How to match tags: 'any' (OR), 'all' (AND), or 'exact'")] = None,
         authorization: Optional[StrictStr] = None,
         _request_timeout: Union[
             None,
@@ -653,14 +1254,16 @@ class MentalModelsApi:
     ) -> MentalModelListResponse:
         """List mental models
 
-        List all mental models for a bank, optionally filtered by subtype or type.
+        List all mental models for a bank, optionally filtered by subtype or tags.
 
         :param bank_id: (required)
         :type bank_id: str
-        :param subtype: Filter by subtype: structural or emergent
+        :param subtype: Filter by subtype: structural, emergent, or pinned
         :type subtype: str
-        :param type: Filter by type: entity, concept, or event
-        :type type: str
+        :param tags: Filter by tags (includes untagged models)
+        :type tags: List[str]
+        :param tags_match: How to match tags: 'any' (OR), 'all' (AND), or 'exact'
+        :type tags_match: str
         :param authorization:
         :type authorization: str
         :param _request_timeout: timeout setting for this request. If one
@@ -688,7 +1291,8 @@ class MentalModelsApi:
         _param = self._list_mental_models_serialize(
             bank_id=bank_id,
             subtype=subtype,
-            type=type,
+            tags=tags,
+            tags_match=tags_match,
             authorization=authorization,
             _request_auth=_request_auth,
             _content_type=_content_type,
@@ -715,8 +1319,9 @@ class MentalModelsApi:
     async def list_mental_models_with_http_info(
         self,
         bank_id: StrictStr,
-        subtype: Annotated[Optional[StrictStr], Field(description="Filter by subtype: structural or emergent")] = None,
-        type: Annotated[Optional[StrictStr], Field(description="Filter by type: entity, concept, or event")] = None,
+        subtype: Annotated[Optional[StrictStr], Field(description="Filter by subtype: structural, emergent, or pinned")] = None,
+        tags: Annotated[Optional[List[StrictStr]], Field(description="Filter by tags (includes untagged models)")] = None,
+        tags_match: Annotated[Optional[StrictStr], Field(description="How to match tags: 'any' (OR), 'all' (AND), or 'exact'")] = None,
         authorization: Optional[StrictStr] = None,
         _request_timeout: Union[
             None,
@@ -733,14 +1338,16 @@ class MentalModelsApi:
     ) -> ApiResponse[MentalModelListResponse]:
         """List mental models
 
-        List all mental models for a bank, optionally filtered by subtype or type.
+        List all mental models for a bank, optionally filtered by subtype or tags.
 
         :param bank_id: (required)
         :type bank_id: str
-        :param subtype: Filter by subtype: structural or emergent
+        :param subtype: Filter by subtype: structural, emergent, or pinned
         :type subtype: str
-        :param type: Filter by type: entity, concept, or event
-        :type type: str
+        :param tags: Filter by tags (includes untagged models)
+        :type tags: List[str]
+        :param tags_match: How to match tags: 'any' (OR), 'all' (AND), or 'exact'
+        :type tags_match: str
         :param authorization:
         :type authorization: str
         :param _request_timeout: timeout setting for this request. If one
@@ -768,7 +1375,8 @@ class MentalModelsApi:
         _param = self._list_mental_models_serialize(
             bank_id=bank_id,
             subtype=subtype,
-            type=type,
+            tags=tags,
+            tags_match=tags_match,
             authorization=authorization,
             _request_auth=_request_auth,
             _content_type=_content_type,
@@ -795,8 +1403,9 @@ class MentalModelsApi:
     async def list_mental_models_without_preload_content(
         self,
         bank_id: StrictStr,
-        subtype: Annotated[Optional[StrictStr], Field(description="Filter by subtype: structural or emergent")] = None,
-        type: Annotated[Optional[StrictStr], Field(description="Filter by type: entity, concept, or event")] = None,
+        subtype: Annotated[Optional[StrictStr], Field(description="Filter by subtype: structural, emergent, or pinned")] = None,
+        tags: Annotated[Optional[List[StrictStr]], Field(description="Filter by tags (includes untagged models)")] = None,
+        tags_match: Annotated[Optional[StrictStr], Field(description="How to match tags: 'any' (OR), 'all' (AND), or 'exact'")] = None,
         authorization: Optional[StrictStr] = None,
         _request_timeout: Union[
             None,
@@ -813,14 +1422,16 @@ class MentalModelsApi:
     ) -> RESTResponseType:
         """List mental models
 
-        List all mental models for a bank, optionally filtered by subtype or type.
+        List all mental models for a bank, optionally filtered by subtype or tags.
 
         :param bank_id: (required)
         :type bank_id: str
-        :param subtype: Filter by subtype: structural or emergent
+        :param subtype: Filter by subtype: structural, emergent, or pinned
         :type subtype: str
-        :param type: Filter by type: entity, concept, or event
-        :type type: str
+        :param tags: Filter by tags (includes untagged models)
+        :type tags: List[str]
+        :param tags_match: How to match tags: 'any' (OR), 'all' (AND), or 'exact'
+        :type tags_match: str
         :param authorization:
         :type authorization: str
         :param _request_timeout: timeout setting for this request. If one
@@ -848,7 +1459,8 @@ class MentalModelsApi:
         _param = self._list_mental_models_serialize(
             bank_id=bank_id,
             subtype=subtype,
-            type=type,
+            tags=tags,
+            tags_match=tags_match,
             authorization=authorization,
             _request_auth=_request_auth,
             _content_type=_content_type,
@@ -871,7 +1483,8 @@ class MentalModelsApi:
         self,
         bank_id,
         subtype,
-        type,
+        tags,
+        tags_match,
         authorization,
         _request_auth,
         _content_type,
@@ -882,6 +1495,7 @@ class MentalModelsApi:
         _host = None
 
         _collection_formats: Dict[str, str] = {
+            'tags': 'multi',
         }
 
         _path_params: Dict[str, str] = {}
@@ -901,9 +1515,13 @@ class MentalModelsApi:
             
             _query_params.append(('subtype', subtype))
             
-        if type is not None:
+        if tags is not None:
             
-            _query_params.append(('type', type))
+            _query_params.append(('tags', tags))
+            
+        if tags_match is not None:
+            
+            _query_params.append(('tags_match', tags_match))
             
         # process the header parameters
         if authorization is not None:
@@ -948,6 +1566,7 @@ class MentalModelsApi:
         self,
         bank_id: StrictStr,
         authorization: Optional[StrictStr] = None,
+        refresh_mental_models_request: Optional[RefreshMentalModelsRequest] = None,
         _request_timeout: Union[
             None,
             Annotated[StrictFloat, Field(gt=0)],
@@ -961,14 +1580,16 @@ class MentalModelsApi:
         _headers: Optional[Dict[StrictStr, Any]] = None,
         _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
     ) -> AsyncOperationSubmitResponse:
-        """Refresh all mental models (async)
+        """Refresh mental models (async)
 
-        Submit a background job to refresh all mental models for a bank. The job will: 1) Derive structural models from the bank's goal, 2) Promote relevant entities to emergent models, 3) Generate summaries for all mental models. Use GET /banks/{bank_id}/operations to check progress.
+        Submit a background job to refresh mental models for a bank. By default refreshes all subtypes. Optionally specify 'subtype' to only refresh 'structural' (from mission) or 'emergent' (from entities) models. Optionally pass tags to apply to newly created models. Use GET /banks/{bank_id}/operations to check progress.
 
         :param bank_id: (required)
         :type bank_id: str
         :param authorization:
         :type authorization: str
+        :param refresh_mental_models_request:
+        :type refresh_mental_models_request: RefreshMentalModelsRequest
         :param _request_timeout: timeout setting for this request. If one
                                  number provided, it will be total request
                                  timeout. It can also be a pair (tuple) of
@@ -994,6 +1615,7 @@ class MentalModelsApi:
         _param = self._refresh_mental_models_serialize(
             bank_id=bank_id,
             authorization=authorization,
+            refresh_mental_models_request=refresh_mental_models_request,
             _request_auth=_request_auth,
             _content_type=_content_type,
             _headers=_headers,
@@ -1020,6 +1642,7 @@ class MentalModelsApi:
         self,
         bank_id: StrictStr,
         authorization: Optional[StrictStr] = None,
+        refresh_mental_models_request: Optional[RefreshMentalModelsRequest] = None,
         _request_timeout: Union[
             None,
             Annotated[StrictFloat, Field(gt=0)],
@@ -1033,14 +1656,16 @@ class MentalModelsApi:
         _headers: Optional[Dict[StrictStr, Any]] = None,
         _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
     ) -> ApiResponse[AsyncOperationSubmitResponse]:
-        """Refresh all mental models (async)
+        """Refresh mental models (async)
 
-        Submit a background job to refresh all mental models for a bank. The job will: 1) Derive structural models from the bank's goal, 2) Promote relevant entities to emergent models, 3) Generate summaries for all mental models. Use GET /banks/{bank_id}/operations to check progress.
+        Submit a background job to refresh mental models for a bank. By default refreshes all subtypes. Optionally specify 'subtype' to only refresh 'structural' (from mission) or 'emergent' (from entities) models. Optionally pass tags to apply to newly created models. Use GET /banks/{bank_id}/operations to check progress.
 
         :param bank_id: (required)
         :type bank_id: str
         :param authorization:
         :type authorization: str
+        :param refresh_mental_models_request:
+        :type refresh_mental_models_request: RefreshMentalModelsRequest
         :param _request_timeout: timeout setting for this request. If one
                                  number provided, it will be total request
                                  timeout. It can also be a pair (tuple) of
@@ -1066,6 +1691,7 @@ class MentalModelsApi:
         _param = self._refresh_mental_models_serialize(
             bank_id=bank_id,
             authorization=authorization,
+            refresh_mental_models_request=refresh_mental_models_request,
             _request_auth=_request_auth,
             _content_type=_content_type,
             _headers=_headers,
@@ -1092,6 +1718,7 @@ class MentalModelsApi:
         self,
         bank_id: StrictStr,
         authorization: Optional[StrictStr] = None,
+        refresh_mental_models_request: Optional[RefreshMentalModelsRequest] = None,
         _request_timeout: Union[
             None,
             Annotated[StrictFloat, Field(gt=0)],
@@ -1105,14 +1732,16 @@ class MentalModelsApi:
         _headers: Optional[Dict[StrictStr, Any]] = None,
         _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
     ) -> RESTResponseType:
-        """Refresh all mental models (async)
+        """Refresh mental models (async)
 
-        Submit a background job to refresh all mental models for a bank. The job will: 1) Derive structural models from the bank's goal, 2) Promote relevant entities to emergent models, 3) Generate summaries for all mental models. Use GET /banks/{bank_id}/operations to check progress.
+        Submit a background job to refresh mental models for a bank. By default refreshes all subtypes. Optionally specify 'subtype' to only refresh 'structural' (from mission) or 'emergent' (from entities) models. Optionally pass tags to apply to newly created models. Use GET /banks/{bank_id}/operations to check progress.
 
         :param bank_id: (required)
         :type bank_id: str
         :param authorization:
         :type authorization: str
+        :param refresh_mental_models_request:
+        :type refresh_mental_models_request: RefreshMentalModelsRequest
         :param _request_timeout: timeout setting for this request. If one
                                  number provided, it will be total request
                                  timeout. It can also be a pair (tuple) of
@@ -1138,6 +1767,7 @@ class MentalModelsApi:
         _param = self._refresh_mental_models_serialize(
             bank_id=bank_id,
             authorization=authorization,
+            refresh_mental_models_request=refresh_mental_models_request,
             _request_auth=_request_auth,
             _content_type=_content_type,
             _headers=_headers,
@@ -1159,6 +1789,7 @@ class MentalModelsApi:
         self,
         bank_id,
         authorization,
+        refresh_mental_models_request,
         _request_auth,
         _content_type,
         _headers,
@@ -1188,6 +1819,8 @@ class MentalModelsApi:
             _header_params['authorization'] = authorization
         # process the form parameters
         # process the body parameter
+        if refresh_mental_models_request is not None:
+            _body_params = refresh_mental_models_request
 
 
         # set the HTTP header `Accept`
@@ -1198,6 +1831,19 @@ class MentalModelsApi:
                 ]
             )
 
+        # set the HTTP header `Content-Type`
+        if _content_type:
+            _header_params['Content-Type'] = _content_type
+        else:
+            _default_content_type = (
+                self.api_client.select_header_content_type(
+                    [
+                        'application/json'
+                    ]
+                )
+            )
+            if _default_content_type is not None:
+                _header_params['Content-Type'] = _default_content_type
 
         # authentication setting
         _auth_settings: List[str] = [
@@ -1242,7 +1888,7 @@ class MentalModelsApi:
     ) -> ResearchResponse:
         """Research query
 
-        Execute a research query against mental models. Returns a synthesized answer with sources.
+        Execute a research query against mental models. Returns a synthesized answer with sources. Optionally filter mental models by tags (includes untagged models).
 
         :param bank_id: (required)
         :type bank_id: str
@@ -1318,7 +1964,7 @@ class MentalModelsApi:
     ) -> ApiResponse[ResearchResponse]:
         """Research query
 
-        Execute a research query against mental models. Returns a synthesized answer with sources.
+        Execute a research query against mental models. Returns a synthesized answer with sources. Optionally filter mental models by tags (includes untagged models).
 
         :param bank_id: (required)
         :type bank_id: str
@@ -1394,7 +2040,7 @@ class MentalModelsApi:
     ) -> RESTResponseType:
         """Research query
 
-        Execute a research query against mental models. Returns a synthesized answer with sources.
+        Execute a research query against mental models. Returns a synthesized answer with sources. Optionally filter mental models by tags (includes untagged models).
 
         :param bank_id: (required)
         :type bank_id: str
@@ -1512,312 +2158,6 @@ class MentalModelsApi:
         return self.api_client.param_serialize(
             method='POST',
             resource_path='/v1/default/banks/{bank_id}/research',
-            path_params=_path_params,
-            query_params=_query_params,
-            header_params=_header_params,
-            body=_body_params,
-            post_params=_form_params,
-            files=_files,
-            auth_settings=_auth_settings,
-            collection_formats=_collection_formats,
-            _host=_host,
-            _request_auth=_request_auth
-        )
-
-
-
-
-    @validate_call
-    async def set_bank_goal(
-        self,
-        bank_id: StrictStr,
-        set_bank_goal_request: SetBankGoalRequest,
-        authorization: Optional[StrictStr] = None,
-        _request_timeout: Union[
-            None,
-            Annotated[StrictFloat, Field(gt=0)],
-            Tuple[
-                Annotated[StrictFloat, Field(gt=0)],
-                Annotated[StrictFloat, Field(gt=0)]
-            ]
-        ] = None,
-        _request_auth: Optional[Dict[StrictStr, Any]] = None,
-        _content_type: Optional[StrictStr] = None,
-        _headers: Optional[Dict[StrictStr, Any]] = None,
-        _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
-    ) -> object:
-        """Set bank goal
-
-        Set the goal for a bank. The goal is used to derive structural mental models.
-
-        :param bank_id: (required)
-        :type bank_id: str
-        :param set_bank_goal_request: (required)
-        :type set_bank_goal_request: SetBankGoalRequest
-        :param authorization:
-        :type authorization: str
-        :param _request_timeout: timeout setting for this request. If one
-                                 number provided, it will be total request
-                                 timeout. It can also be a pair (tuple) of
-                                 (connection, read) timeouts.
-        :type _request_timeout: int, tuple(int, int), optional
-        :param _request_auth: set to override the auth_settings for an a single
-                              request; this effectively ignores the
-                              authentication in the spec for a single request.
-        :type _request_auth: dict, optional
-        :param _content_type: force content-type for the request.
-        :type _content_type: str, Optional
-        :param _headers: set to override the headers for a single
-                         request; this effectively ignores the headers
-                         in the spec for a single request.
-        :type _headers: dict, optional
-        :param _host_index: set to override the host_index for a single
-                            request; this effectively ignores the host_index
-                            in the spec for a single request.
-        :type _host_index: int, optional
-        :return: Returns the result object.
-        """ # noqa: E501
-
-        _param = self._set_bank_goal_serialize(
-            bank_id=bank_id,
-            set_bank_goal_request=set_bank_goal_request,
-            authorization=authorization,
-            _request_auth=_request_auth,
-            _content_type=_content_type,
-            _headers=_headers,
-            _host_index=_host_index
-        )
-
-        _response_types_map: Dict[str, Optional[str]] = {
-            '200': "object",
-            '422': "HTTPValidationError",
-        }
-        response_data = await self.api_client.call_api(
-            *_param,
-            _request_timeout=_request_timeout
-        )
-        await response_data.read()
-        return self.api_client.response_deserialize(
-            response_data=response_data,
-            response_types_map=_response_types_map,
-        ).data
-
-
-    @validate_call
-    async def set_bank_goal_with_http_info(
-        self,
-        bank_id: StrictStr,
-        set_bank_goal_request: SetBankGoalRequest,
-        authorization: Optional[StrictStr] = None,
-        _request_timeout: Union[
-            None,
-            Annotated[StrictFloat, Field(gt=0)],
-            Tuple[
-                Annotated[StrictFloat, Field(gt=0)],
-                Annotated[StrictFloat, Field(gt=0)]
-            ]
-        ] = None,
-        _request_auth: Optional[Dict[StrictStr, Any]] = None,
-        _content_type: Optional[StrictStr] = None,
-        _headers: Optional[Dict[StrictStr, Any]] = None,
-        _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
-    ) -> ApiResponse[object]:
-        """Set bank goal
-
-        Set the goal for a bank. The goal is used to derive structural mental models.
-
-        :param bank_id: (required)
-        :type bank_id: str
-        :param set_bank_goal_request: (required)
-        :type set_bank_goal_request: SetBankGoalRequest
-        :param authorization:
-        :type authorization: str
-        :param _request_timeout: timeout setting for this request. If one
-                                 number provided, it will be total request
-                                 timeout. It can also be a pair (tuple) of
-                                 (connection, read) timeouts.
-        :type _request_timeout: int, tuple(int, int), optional
-        :param _request_auth: set to override the auth_settings for an a single
-                              request; this effectively ignores the
-                              authentication in the spec for a single request.
-        :type _request_auth: dict, optional
-        :param _content_type: force content-type for the request.
-        :type _content_type: str, Optional
-        :param _headers: set to override the headers for a single
-                         request; this effectively ignores the headers
-                         in the spec for a single request.
-        :type _headers: dict, optional
-        :param _host_index: set to override the host_index for a single
-                            request; this effectively ignores the host_index
-                            in the spec for a single request.
-        :type _host_index: int, optional
-        :return: Returns the result object.
-        """ # noqa: E501
-
-        _param = self._set_bank_goal_serialize(
-            bank_id=bank_id,
-            set_bank_goal_request=set_bank_goal_request,
-            authorization=authorization,
-            _request_auth=_request_auth,
-            _content_type=_content_type,
-            _headers=_headers,
-            _host_index=_host_index
-        )
-
-        _response_types_map: Dict[str, Optional[str]] = {
-            '200': "object",
-            '422': "HTTPValidationError",
-        }
-        response_data = await self.api_client.call_api(
-            *_param,
-            _request_timeout=_request_timeout
-        )
-        await response_data.read()
-        return self.api_client.response_deserialize(
-            response_data=response_data,
-            response_types_map=_response_types_map,
-        )
-
-
-    @validate_call
-    async def set_bank_goal_without_preload_content(
-        self,
-        bank_id: StrictStr,
-        set_bank_goal_request: SetBankGoalRequest,
-        authorization: Optional[StrictStr] = None,
-        _request_timeout: Union[
-            None,
-            Annotated[StrictFloat, Field(gt=0)],
-            Tuple[
-                Annotated[StrictFloat, Field(gt=0)],
-                Annotated[StrictFloat, Field(gt=0)]
-            ]
-        ] = None,
-        _request_auth: Optional[Dict[StrictStr, Any]] = None,
-        _content_type: Optional[StrictStr] = None,
-        _headers: Optional[Dict[StrictStr, Any]] = None,
-        _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
-    ) -> RESTResponseType:
-        """Set bank goal
-
-        Set the goal for a bank. The goal is used to derive structural mental models.
-
-        :param bank_id: (required)
-        :type bank_id: str
-        :param set_bank_goal_request: (required)
-        :type set_bank_goal_request: SetBankGoalRequest
-        :param authorization:
-        :type authorization: str
-        :param _request_timeout: timeout setting for this request. If one
-                                 number provided, it will be total request
-                                 timeout. It can also be a pair (tuple) of
-                                 (connection, read) timeouts.
-        :type _request_timeout: int, tuple(int, int), optional
-        :param _request_auth: set to override the auth_settings for an a single
-                              request; this effectively ignores the
-                              authentication in the spec for a single request.
-        :type _request_auth: dict, optional
-        :param _content_type: force content-type for the request.
-        :type _content_type: str, Optional
-        :param _headers: set to override the headers for a single
-                         request; this effectively ignores the headers
-                         in the spec for a single request.
-        :type _headers: dict, optional
-        :param _host_index: set to override the host_index for a single
-                            request; this effectively ignores the host_index
-                            in the spec for a single request.
-        :type _host_index: int, optional
-        :return: Returns the result object.
-        """ # noqa: E501
-
-        _param = self._set_bank_goal_serialize(
-            bank_id=bank_id,
-            set_bank_goal_request=set_bank_goal_request,
-            authorization=authorization,
-            _request_auth=_request_auth,
-            _content_type=_content_type,
-            _headers=_headers,
-            _host_index=_host_index
-        )
-
-        _response_types_map: Dict[str, Optional[str]] = {
-            '200': "object",
-            '422': "HTTPValidationError",
-        }
-        response_data = await self.api_client.call_api(
-            *_param,
-            _request_timeout=_request_timeout
-        )
-        return response_data.response
-
-
-    def _set_bank_goal_serialize(
-        self,
-        bank_id,
-        set_bank_goal_request,
-        authorization,
-        _request_auth,
-        _content_type,
-        _headers,
-        _host_index,
-    ) -> RequestSerialized:
-
-        _host = None
-
-        _collection_formats: Dict[str, str] = {
-        }
-
-        _path_params: Dict[str, str] = {}
-        _query_params: List[Tuple[str, str]] = []
-        _header_params: Dict[str, Optional[str]] = _headers or {}
-        _form_params: List[Tuple[str, str]] = []
-        _files: Dict[
-            str, Union[str, bytes, List[str], List[bytes], List[Tuple[str, bytes]]]
-        ] = {}
-        _body_params: Optional[bytes] = None
-
-        # process the path parameters
-        if bank_id is not None:
-            _path_params['bank_id'] = bank_id
-        # process the query parameters
-        # process the header parameters
-        if authorization is not None:
-            _header_params['authorization'] = authorization
-        # process the form parameters
-        # process the body parameter
-        if set_bank_goal_request is not None:
-            _body_params = set_bank_goal_request
-
-
-        # set the HTTP header `Accept`
-        if 'Accept' not in _header_params:
-            _header_params['Accept'] = self.api_client.select_header_accept(
-                [
-                    'application/json'
-                ]
-            )
-
-        # set the HTTP header `Content-Type`
-        if _content_type:
-            _header_params['Content-Type'] = _content_type
-        else:
-            _default_content_type = (
-                self.api_client.select_header_content_type(
-                    [
-                        'application/json'
-                    ]
-                )
-            )
-            if _default_content_type is not None:
-                _header_params['Content-Type'] = _default_content_type
-
-        # authentication setting
-        _auth_settings: List[str] = [
-        ]
-
-        return self.api_client.param_serialize(
-            method='PUT',
-            resource_path='/v1/default/banks/{bank_id}/goal',
             path_params=_path_params,
             query_params=_query_params,
             header_params=_header_params,

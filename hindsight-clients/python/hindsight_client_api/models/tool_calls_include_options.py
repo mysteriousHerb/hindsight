@@ -17,17 +17,17 @@ import pprint
 import re  # noqa: F401
 import json
 
-from pydantic import BaseModel, ConfigDict, Field, StrictStr
-from typing import Any, ClassVar, Dict, List
+from pydantic import BaseModel, ConfigDict, Field, StrictBool
+from typing import Any, ClassVar, Dict, List, Optional
 from typing import Optional, Set
 from typing_extensions import Self
 
-class SetBankGoalRequest(BaseModel):
+class ToolCallsIncludeOptions(BaseModel):
     """
-    Request model for setting a bank's goal.
+    Options for including tool calls in reflect results.
     """ # noqa: E501
-    goal: StrictStr = Field(description="The goal for this bank/agent")
-    __properties: ClassVar[List[str]] = ["goal"]
+    output: Optional[StrictBool] = Field(default=True, description="Include tool outputs in the trace. Set to false to only include inputs (smaller payload).")
+    __properties: ClassVar[List[str]] = ["output"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -47,7 +47,7 @@ class SetBankGoalRequest(BaseModel):
 
     @classmethod
     def from_json(cls, json_str: str) -> Optional[Self]:
-        """Create an instance of SetBankGoalRequest from a JSON string"""
+        """Create an instance of ToolCallsIncludeOptions from a JSON string"""
         return cls.from_dict(json.loads(json_str))
 
     def to_dict(self) -> Dict[str, Any]:
@@ -72,7 +72,7 @@ class SetBankGoalRequest(BaseModel):
 
     @classmethod
     def from_dict(cls, obj: Optional[Dict[str, Any]]) -> Optional[Self]:
-        """Create an instance of SetBankGoalRequest from a dict"""
+        """Create an instance of ToolCallsIncludeOptions from a dict"""
         if obj is None:
             return None
 
@@ -80,7 +80,7 @@ class SetBankGoalRequest(BaseModel):
             return cls.model_validate(obj)
 
         _obj = cls.model_validate({
-            "goal": obj.get("goal")
+            "output": obj.get("output") if obj.get("output") is not None else True
         })
         return _obj
 

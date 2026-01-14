@@ -5,7 +5,6 @@ import { client } from "@/lib/api";
 import { useBank } from "@/lib/bank-context";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
 import {
   Select,
   SelectContent,
@@ -15,19 +14,21 @@ import {
 } from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Sparkles, Info, Tag } from "lucide-react";
+import { Sparkles, Info, Tag, Clock, Database } from "lucide-react";
 import JsonView from "react18-json-view";
 import "react18-json-view/src/style.css";
 
 type TagsMatch = "any" | "all" | "any_strict" | "all_strict";
+type ViewMode = "answer" | "trace" | "json";
 
 export function ThinkView() {
   const { currentBank } = useBank();
   const [query, setQuery] = useState("");
-  const [context, setContext] = useState("");
   const [budget, setBudget] = useState<"low" | "mid" | "high">("mid");
+  const [maxTokens, setMaxTokens] = useState<number>(4096);
   const [includeFacts, setIncludeFacts] = useState(true);
-  const [showRawJson, setShowRawJson] = useState(false);
+  const [includeToolCalls, setIncludeToolCalls] = useState(true);
+  const [viewMode, setViewMode] = useState<ViewMode>("answer");
   const [result, setResult] = useState<any>(null);
   const [loading, setLoading] = useState(false);
   const [tags, setTags] = useState("");
@@ -37,7 +38,7 @@ export function ThinkView() {
     if (!currentBank || !query) return;
 
     setLoading(true);
-    setShowRawJson(false);
+    setViewMode("answer");
     try {
       // Parse tags from comma-separated string
       const parsedTags = tags
@@ -49,8 +50,9 @@ export function ThinkView() {
         bank_id: currentBank,
         query,
         budget,
-        context: context || undefined,
+        max_tokens: maxTokens,
         include_facts: includeFacts,
+        include_tool_calls: includeToolCalls,
         ...(parsedTags.length > 0 && { tags: parsedTags, tags_match: tagsMatch }),
       });
       setResult(data);
@@ -62,25 +64,47 @@ export function ThinkView() {
     }
   };
 
+  if (!currentBank) {
+    return (
+      <Card className="border-dashed">
+        <CardContent className="flex flex-col items-center justify-center py-16">
+          <Database className="h-12 w-12 text-muted-foreground mb-4" />
+          <h3 className="text-xl font-semibold mb-2">No Bank Selected</h3>
+          <p className="text-muted-foreground">Select a memory bank to start reflecting.</p>
+        </CardContent>
+      </Card>
+    );
+  }
+
   return (
-    <div className="max-w-6xl">
+    <div className="space-y-6">
+      {/* Query Input */}
       <Card>
-        <CardContent className="p-5 space-y-4">
-          <div className="flex gap-4 items-end flex-wrap">
-            <div className="flex-1 min-w-[300px]">
-              <label className="font-bold block mb-2 text-card-foreground">Question:</label>
+        <CardContent className="pt-6">
+          <div className="flex gap-3">
+            <div className="flex-1 relative">
+              <Sparkles className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
               <Input
                 type="text"
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
-                placeholder="Enter your question..."
+                placeholder="What would you like to reflect on?"
+                className="pl-10 h-12 text-lg"
                 onKeyDown={(e) => e.key === "Enter" && runReflect()}
               />
             </div>
-            <div>
-              <label className="font-bold block mb-2 text-card-foreground">Budget:</label>
+            <Button onClick={runReflect} disabled={loading || !query} className="h-12 px-8">
+              {loading ? "Reflecting..." : "Reflect"}
+            </Button>
+          </div>
+
+          {/* Filters */}
+          <div className="flex flex-wrap items-center gap-6 mt-4 pt-4 border-t">
+            {/* Budget */}
+            <div className="flex items-center gap-2">
+              <span className="text-sm font-medium text-muted-foreground">Budget:</span>
               <Select value={budget} onValueChange={(value: any) => setBudget(value)}>
-                <SelectTrigger className="w-24">
+                <SelectTrigger className="w-24 h-8">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -90,30 +114,40 @@ export function ThinkView() {
                 </SelectContent>
               </Select>
             </div>
+
+            {/* Max Tokens */}
             <div className="flex items-center gap-2">
-              <Checkbox
-                id="include-facts"
-                checked={includeFacts}
-                onCheckedChange={(checked) => setIncludeFacts(checked as boolean)}
+              <span className="text-sm text-muted-foreground">Tokens:</span>
+              <Input
+                type="number"
+                value={maxTokens}
+                onChange={(e) => setMaxTokens(parseInt(e.target.value) || 4096)}
+                className="w-24 h-8"
               />
-              <label htmlFor="include-facts" className="text-sm cursor-pointer">
-                Include Facts
+            </div>
+
+            <div className="h-6 w-px bg-border" />
+
+            {/* Include options */}
+            <div className="flex items-center gap-4">
+              <label className="flex items-center gap-2 cursor-pointer">
+                <Checkbox
+                  checked={includeFacts}
+                  onCheckedChange={(c) => setIncludeFacts(c as boolean)}
+                />
+                <span className="text-sm">Include Facts</span>
+              </label>
+              <label className="flex items-center gap-2 cursor-pointer">
+                <Checkbox
+                  checked={includeToolCalls}
+                  onCheckedChange={(c) => setIncludeToolCalls(c as boolean)}
+                />
+                <span className="text-sm">Include Tools</span>
               </label>
             </div>
-            <Button onClick={runReflect} disabled={loading || !query}>
-              <Sparkles className="w-4 h-4 mr-2" />
-              Reflect
-            </Button>
           </div>
-          <div>
-            <label className="font-bold block mb-2 text-card-foreground">Context (optional):</label>
-            <Textarea
-              value={context}
-              onChange={(e) => setContext(e.target.value)}
-              placeholder="Additional context for the LLM (not used in search)..."
-              rows={3}
-            />
-          </div>
+
+          {/* Tags Filter */}
           <div className="flex items-center gap-4 mt-4 pt-4 border-t">
             <Tag className="h-4 w-4 text-muted-foreground" />
             <div className="flex-1 max-w-md">
@@ -140,205 +174,399 @@ export function ThinkView() {
         </CardContent>
       </Card>
 
+      {/* Loading State */}
       {loading && (
-        <Card className="mt-6">
-          <CardContent className="text-center py-10">
-            <Sparkles className="w-12 h-12 mx-auto mb-3 text-muted-foreground animate-pulse" />
-            <div className="text-lg text-muted-foreground">Reflecting...</div>
+        <Card>
+          <CardContent className="flex flex-col items-center justify-center py-16">
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mb-4" />
+            <p className="text-muted-foreground">Reflecting on memories...</p>
           </CardContent>
         </Card>
       )}
 
-      {result && !loading && (
-        <div className="mt-6 space-y-6">
-          <Card>
-            <CardHeader>
-              <CardTitle>Answer</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="p-4 bg-muted rounded-lg border-l-4 border-primary text-base leading-relaxed whitespace-pre-wrap">
-                {result.text}
+      {/* Results */}
+      {!loading && result && (
+        <div className="space-y-4">
+          {/* Summary Stats & Tabs */}
+          <div className="flex items-center gap-6 text-sm">
+            {result.usage && (
+              <>
+                <div className="flex items-center gap-2">
+                  <span className="text-muted-foreground">Input tokens:</span>
+                  <span className="font-semibold">
+                    {result.usage.input_tokens?.toLocaleString()}
+                  </span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-muted-foreground">Output tokens:</span>
+                  <span className="font-semibold">
+                    {result.usage.output_tokens?.toLocaleString()}
+                  </span>
+                </div>
+              </>
+            )}
+            {result.tool_calls && (
+              <div className="flex items-center gap-2">
+                <span className="text-muted-foreground">Tool calls:</span>
+                <span className="font-semibold">{result.tool_calls.length}</span>
+                <span className="text-muted-foreground">
+                  ({result.tool_calls.reduce((sum: number, tc: any) => sum + tc.duration_ms, 0)}ms)
+                </span>
               </div>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader>
-              <div className="flex items-center justify-between">
-                <div>
-                  <CardTitle>Details</CardTitle>
-                  <CardDescription>View facts and raw response</CardDescription>
-                </div>
-                <div className="flex gap-2">
-                  <Button
-                    variant={!showRawJson ? "default" : "outline"}
-                    size="sm"
-                    onClick={() => setShowRawJson(false)}
-                  >
-                    Based On
-                  </Button>
-                  <Button
-                    variant={showRawJson ? "default" : "outline"}
-                    size="sm"
-                    onClick={() => setShowRawJson(true)}
-                  >
-                    Raw JSON
-                  </Button>
-                </div>
+            )}
+            {result.llm_calls && (
+              <div className="flex items-center gap-2">
+                <span className="text-muted-foreground">LLM calls:</span>
+                <span className="font-semibold">{result.llm_calls.length}</span>
+                <span className="text-muted-foreground">
+                  ({result.llm_calls.reduce((sum: number, lc: any) => sum + lc.duration_ms, 0)}ms)
+                </span>
               </div>
-            </CardHeader>
-            <CardContent>
-              {!showRawJson ? (
-                includeFacts && result.based_on && result.based_on.length > 0 ? (
-                  (() => {
-                    // Group facts by type
-                    const worldFacts = result.based_on.filter((f: any) => f.type === "world");
-                    const experienceFacts = result.based_on.filter(
-                      (f: any) => f.type === "experience"
-                    );
-                    const opinionFacts = result.based_on.filter((f: any) => f.type === "opinion");
+            )}
 
-                    return (
-                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                        <Card>
-                          <CardHeader className="pb-3">
-                            <CardTitle className="text-base">World Facts</CardTitle>
-                            <CardDescription className="text-xs">General Knowledge</CardDescription>
-                          </CardHeader>
-                          <CardContent>
-                            {worldFacts.length > 0 ? (
-                              <ul className="text-sm space-y-2">
-                                {worldFacts.map((fact: any, i: number) => (
-                                  <li key={i} className="p-2 bg-muted rounded">
-                                    {fact.text}
-                                    {fact.context && (
-                                      <div className="text-xs text-muted-foreground mt-1">
-                                        {fact.context}
-                                      </div>
-                                    )}
-                                  </li>
-                                ))}
-                              </ul>
-                            ) : (
-                              <p className="text-muted-foreground text-sm">None</p>
-                            )}
-                          </CardContent>
-                        </Card>
+            <div className="flex-1" />
 
-                        <Card>
-                          <CardHeader className="pb-3">
-                            <CardTitle className="text-base">Experience</CardTitle>
-                            <CardDescription className="text-xs">
-                              Conversations & Events
-                            </CardDescription>
-                          </CardHeader>
-                          <CardContent>
-                            {experienceFacts.length > 0 ? (
-                              <ul className="text-sm space-y-2">
-                                {experienceFacts.map((fact: any, i: number) => (
-                                  <li key={i} className="p-2 bg-muted rounded">
-                                    {fact.text}
-                                    {fact.context && (
-                                      <div className="text-xs text-muted-foreground mt-1">
-                                        {fact.context}
-                                      </div>
-                                    )}
-                                  </li>
-                                ))}
-                              </ul>
-                            ) : (
-                              <p className="text-muted-foreground text-sm">None</p>
-                            )}
-                          </CardContent>
-                        </Card>
+            {/* View Mode Tabs */}
+            <div className="flex gap-1 bg-muted p-1 rounded-lg">
+              {(["answer", "trace", "json"] as ViewMode[]).map((mode) => (
+                <button
+                  key={mode}
+                  onClick={() => setViewMode(mode)}
+                  className={`px-3 py-1.5 text-sm font-medium rounded-md transition-colors ${
+                    viewMode === mode
+                      ? "bg-background shadow-sm"
+                      : "text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  {mode === "answer" ? "Answer" : mode === "trace" ? "Trace" : "JSON"}
+                </button>
+              ))}
+            </div>
+          </div>
 
-                        <Card>
-                          <CardHeader className="pb-3">
-                            <CardTitle className="text-base">Opinions</CardTitle>
-                            <CardDescription className="text-xs">
-                              Beliefs & Preferences
-                            </CardDescription>
-                          </CardHeader>
-                          <CardContent>
-                            {opinionFacts.length > 0 ? (
-                              <ul className="text-sm space-y-2">
-                                {opinionFacts.map((fact: any, i: number) => (
-                                  <li key={i} className="p-2 bg-muted rounded">
-                                    {fact.text}
-                                    {fact.context && (
-                                      <div className="text-xs text-muted-foreground mt-1">
-                                        {fact.context}
-                                      </div>
-                                    )}
-                                  </li>
-                                ))}
-                              </ul>
-                            ) : (
-                              <p className="text-muted-foreground text-sm">None</p>
-                            )}
-                          </CardContent>
-                        </Card>
-                      </div>
-                    );
-                  })()
-                ) : includeFacts ? (
-                  <div className="flex items-start gap-3 p-4 bg-amber-50 dark:bg-amber-950 border border-amber-200 dark:border-amber-800 rounded-lg">
-                    <Info className="w-5 h-5 text-amber-600 dark:text-amber-400 mt-0.5 flex-shrink-0" />
-                    <div>
-                      <p className="font-semibold text-amber-900 dark:text-amber-100">
-                        No facts found
-                      </p>
-                      <p className="text-sm text-amber-700 dark:text-amber-300 mt-1">
-                        No memories were found or used to generate this answer.
-                      </p>
+          {/* Answer View */}
+          {viewMode === "answer" && (
+            <div className="space-y-6">
+              {/* Main Answer */}
+              <Card>
+                <CardHeader>
+                  <CardTitle>Answer</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="text-base leading-relaxed whitespace-pre-wrap">{result.text}</div>
+                </CardContent>
+              </Card>
+
+              {/* New Opinions Formed */}
+              {result.new_opinions && result.new_opinions.length > 0 && (
+                <Card className="border-green-200 dark:border-green-800">
+                  <CardHeader className="bg-green-50 dark:bg-green-950">
+                    <CardTitle className="flex items-center gap-2">
+                      <Sparkles className="w-5 h-5" />
+                      New Opinions Formed
+                    </CardTitle>
+                    <CardDescription>New beliefs generated from this interaction</CardDescription>
+                  </CardHeader>
+                  <CardContent className="pt-6">
+                    <div className="space-y-3">
+                      {result.new_opinions.map((opinion: any, i: number) => (
+                        <div key={i} className="p-3 bg-muted rounded-lg border border-border">
+                          <div className="font-semibold text-foreground">{opinion.text}</div>
+                          <div className="text-sm text-muted-foreground mt-1">
+                            Confidence: {opinion.confidence?.toFixed(2)}
+                          </div>
+                        </div>
+                      ))}
                     </div>
-                  </div>
-                ) : (
-                  <div className="flex items-start gap-3 p-4 bg-amber-50 dark:bg-amber-950 border border-amber-200 dark:border-amber-800 rounded-lg">
-                    <Info className="w-5 h-5 text-amber-600 dark:text-amber-400 mt-0.5 flex-shrink-0" />
-                    <div>
-                      <p className="font-semibold text-amber-900 dark:text-amber-100">
-                        Facts not included
-                      </p>
-                      <p className="text-sm text-amber-700 dark:text-amber-300 mt-1">
-                        Enable "Include Facts" above to see which memories were used to generate
-                        this answer.
-                      </p>
-                    </div>
-                  </div>
-                )
-              ) : (
-                <div className="bg-muted p-4 rounded border border-border overflow-auto max-h-[600px]">
-                  <JsonView src={result} collapsed={1} theme="default" />
-                </div>
+                  </CardContent>
+                </Card>
               )}
-            </CardContent>
-          </Card>
+            </div>
+          )}
 
-          {result.new_opinions && result.new_opinions.length > 0 && (
-            <Card className="border-green-200 dark:border-green-800">
-              <CardHeader className="bg-green-50 dark:bg-green-950">
-                <CardTitle className="flex items-center gap-2">
-                  <Sparkles className="w-5 h-5" />
-                  New Opinions Formed
-                </CardTitle>
-                <CardDescription>New beliefs generated from this interaction</CardDescription>
-              </CardHeader>
-              <CardContent className="pt-6">
-                <div className="space-y-3">
-                  {result.new_opinions.map((opinion: any, i: number) => (
-                    <div key={i} className="p-3 bg-muted rounded-lg border border-border">
-                      <div className="font-semibold text-foreground">{opinion.text}</div>
-                      <div className="text-sm text-muted-foreground mt-1">
-                        Confidence: {opinion.confidence?.toFixed(2)}
-                      </div>
+          {/* Trace View - Split Layout */}
+          {viewMode === "trace" && (
+            <div className="space-y-4">
+              {/* LLM Calls Summary */}
+              {result.llm_calls && result.llm_calls.length > 0 && (
+                <Card>
+                  <CardHeader className="pb-3">
+                    <CardTitle className="text-base">LLM Calls</CardTitle>
+                    <CardDescription className="text-xs">
+                      {result.llm_calls.length} LLM call{result.llm_calls.length !== 1 ? "s" : ""} •{" "}
+                      {result.llm_calls.reduce((sum: number, lc: any) => sum + lc.duration_ms, 0)}ms
+                      total
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="flex flex-wrap gap-2">
+                      {result.llm_calls.map((lc: any, i: number) => (
+                        <div
+                          key={i}
+                          className="flex items-center gap-2 px-3 py-1.5 bg-muted rounded-lg border border-border"
+                        >
+                          <span className="text-sm font-medium">{lc.scope}</span>
+                          <span className="text-xs text-muted-foreground flex items-center gap-1">
+                            <Clock className="w-3 h-3" />
+                            {lc.duration_ms}ms
+                          </span>
+                        </div>
+                      ))}
                     </div>
-                  ))}
+                  </CardContent>
+                </Card>
+              )}
+
+              {/* Tool Calls and Based On - Side by Side */}
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                {/* Left: Tool Calls */}
+                <Card className="h-fit">
+                  <CardHeader className="pb-3">
+                    <CardTitle className="text-base">Tool Calls</CardTitle>
+                    <CardDescription className="text-xs">
+                      {result.tool_calls?.length || 0} tool call
+                      {result.tool_calls?.length !== 1 ? "s" : ""} executed
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    {!includeToolCalls ? (
+                      <div className="flex items-start gap-3 p-3 bg-muted border border-border rounded-lg">
+                        <Info className="w-4 h-4 text-muted-foreground mt-0.5 flex-shrink-0" />
+                        <div>
+                          <p className="font-medium text-sm text-foreground">Not included</p>
+                          <p className="text-xs text-muted-foreground mt-0.5">
+                            Enable "Include Tool Calls" to see trace.
+                          </p>
+                        </div>
+                      </div>
+                    ) : result.tool_calls && result.tool_calls.length > 0 ? (
+                      <div className="space-y-3 max-h-[500px] overflow-y-auto">
+                        {result.tool_calls.map((tc: any, i: number) => (
+                          <div key={i} className="border border-border rounded-lg overflow-hidden">
+                            <div className="flex items-center justify-between px-3 py-1.5 bg-muted/50">
+                              <div className="flex items-center gap-2">
+                                <span className="text-xs font-mono text-muted-foreground">
+                                  #{i + 1}
+                                </span>
+                                <span className="font-medium text-sm text-foreground">
+                                  {tc.tool}
+                                </span>
+                              </div>
+                              <div className="flex items-center gap-1 text-xs text-muted-foreground">
+                                <Clock className="w-3 h-3" />
+                                {tc.duration_ms}ms
+                              </div>
+                            </div>
+                            <div className="p-2 space-y-2">
+                              <div>
+                                <p className="text-[10px] font-semibold text-muted-foreground mb-1">
+                                  Input:
+                                </p>
+                                <div className="bg-muted p-1.5 rounded text-xs overflow-auto max-h-32">
+                                  <JsonView src={tc.input} collapsed={1} theme="default" />
+                                </div>
+                              </div>
+                              {tc.output && (
+                                <div>
+                                  <p className="text-[10px] font-semibold text-muted-foreground mb-1">
+                                    Output:
+                                  </p>
+                                  <div className="bg-muted p-1.5 rounded text-xs overflow-auto max-h-32">
+                                    <JsonView src={tc.output} collapsed={1} theme="default" />
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="flex items-start gap-3 p-3 bg-muted border border-border rounded-lg">
+                        <Info className="w-4 h-4 text-muted-foreground mt-0.5 flex-shrink-0" />
+                        <div>
+                          <p className="font-medium text-sm text-foreground">No tool calls</p>
+                          <p className="text-xs text-muted-foreground mt-0.5">
+                            No tools were called during this reflection.
+                          </p>
+                        </div>
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+
+                {/* Right: Based On Facts */}
+                <Card className="h-fit">
+                  <CardHeader className="pb-3">
+                    <CardTitle className="text-base">Based On</CardTitle>
+                    <CardDescription className="text-xs">
+                      {result.based_on?.length || 0} memories used
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    {!includeFacts ? (
+                      <div className="flex items-start gap-3 p-3 bg-muted border border-border rounded-lg">
+                        <Info className="w-4 h-4 text-muted-foreground mt-0.5 flex-shrink-0" />
+                        <div>
+                          <p className="font-medium text-sm text-foreground">Not included</p>
+                          <p className="text-xs text-muted-foreground mt-0.5">
+                            Enable "Include Facts" to see memories.
+                          </p>
+                        </div>
+                      </div>
+                    ) : result.based_on && result.based_on.length > 0 ? (
+                      <div className="space-y-4 max-h-[500px] overflow-y-auto">
+                        {(() => {
+                          const worldFacts = result.based_on.filter((f: any) => f.type === "world");
+                          const experienceFacts = result.based_on.filter(
+                            (f: any) => f.type === "experience"
+                          );
+                          const opinionFacts = result.based_on.filter(
+                            (f: any) => f.type === "opinion"
+                          );
+                          const mentalModelFacts = result.based_on.filter(
+                            (f: any) => f.type === "mental_model"
+                          );
+
+                          return (
+                            <>
+                              {/* Mental Models */}
+                              {mentalModelFacts.length > 0 && (
+                                <div className="space-y-1.5">
+                                  <div className="flex items-center gap-2 text-xs font-semibold text-orange-600 dark:text-orange-400">
+                                    <div className="w-2 h-2 rounded-full bg-orange-500" />
+                                    Mental Models ({mentalModelFacts.length})
+                                  </div>
+                                  <div className="space-y-1.5">
+                                    {mentalModelFacts.map((fact: any, i: number) => (
+                                      <div key={i} className="p-2 bg-muted rounded text-xs">
+                                        {fact.text}
+                                        {fact.context && (
+                                          <div className="text-[10px] text-muted-foreground mt-1">
+                                            {fact.context}
+                                          </div>
+                                        )}
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
+
+                              {/* World Facts */}
+                              {worldFacts.length > 0 && (
+                                <div className="space-y-1.5">
+                                  <div className="flex items-center gap-2 text-xs font-semibold text-blue-600 dark:text-blue-400">
+                                    <div className="w-2 h-2 rounded-full bg-blue-500" />
+                                    World ({worldFacts.length})
+                                  </div>
+                                  <div className="space-y-1.5">
+                                    {worldFacts.map((fact: any, i: number) => (
+                                      <div key={i} className="p-2 bg-muted rounded text-xs">
+                                        {fact.text}
+                                        {fact.context && (
+                                          <div className="text-[10px] text-muted-foreground mt-1">
+                                            {fact.context}
+                                          </div>
+                                        )}
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
+
+                              {/* Experience Facts */}
+                              {experienceFacts.length > 0 && (
+                                <div className="space-y-1.5">
+                                  <div className="flex items-center gap-2 text-xs font-semibold text-green-600 dark:text-green-400">
+                                    <div className="w-2 h-2 rounded-full bg-green-500" />
+                                    Experience ({experienceFacts.length})
+                                  </div>
+                                  <div className="space-y-1.5">
+                                    {experienceFacts.map((fact: any, i: number) => (
+                                      <div key={i} className="p-2 bg-muted rounded text-xs">
+                                        {fact.text}
+                                        {fact.context && (
+                                          <div className="text-[10px] text-muted-foreground mt-1">
+                                            {fact.context}
+                                          </div>
+                                        )}
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
+
+                              {/* Opinion Facts */}
+                              {opinionFacts.length > 0 && (
+                                <div className="space-y-1.5">
+                                  <div className="flex items-center gap-2 text-xs font-semibold text-purple-600 dark:text-purple-400">
+                                    <div className="w-2 h-2 rounded-full bg-purple-500" />
+                                    Opinions ({opinionFacts.length})
+                                  </div>
+                                  <div className="space-y-1.5">
+                                    {opinionFacts.map((fact: any, i: number) => (
+                                      <div key={i} className="p-2 bg-muted rounded text-xs">
+                                        {fact.text}
+                                        {fact.context && (
+                                          <div className="text-[10px] text-muted-foreground mt-1">
+                                            {fact.context}
+                                          </div>
+                                        )}
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
+                            </>
+                          );
+                        })()}
+                      </div>
+                    ) : (
+                      <div className="flex items-start gap-3 p-3 bg-amber-50 dark:bg-amber-950 border border-amber-200 dark:border-amber-800 rounded-lg">
+                        <Info className="w-4 h-4 text-amber-600 dark:text-amber-400 mt-0.5 flex-shrink-0" />
+                        <div>
+                          <p className="font-medium text-sm text-amber-900 dark:text-amber-100">
+                            No facts found
+                          </p>
+                          <p className="text-xs text-amber-700 dark:text-amber-300 mt-0.5">
+                            No memories were used to generate this answer.
+                          </p>
+                        </div>
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+              </div>
+            </div>
+          )}
+
+          {/* JSON View */}
+          {viewMode === "json" && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-lg">Raw Response</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="bg-muted p-4 rounded-lg overflow-auto max-h-[600px]">
+                  <JsonView src={result} collapsed={2} theme="default" />
                 </div>
               </CardContent>
             </Card>
           )}
         </div>
+      )}
+
+      {/* Empty State */}
+      {!loading && !result && (
+        <Card className="border-dashed">
+          <CardContent className="flex flex-col items-center justify-center py-16">
+            <Sparkles className="h-12 w-12 text-muted-foreground mb-4" />
+            <h3 className="text-lg font-semibold mb-2">Ready to Reflect</h3>
+            <p className="text-muted-foreground text-center max-w-md">
+              Enter a question above to query the memory bank and generate a disposition-aware
+              response.
+            </p>
+          </CardContent>
+        </Card>
       )}
     </div>
   );

@@ -43,10 +43,10 @@ async def tool_lookup(
         Dict with either a list of models or a single model's details
     """
     if model_id:
-        # Get specific mental model with full details
+        # Get specific mental model with full details including observations
         row = await conn.fetchrow(
             """
-            SELECT id, type, subtype, name, description, summary, entity_id, triggers, last_updated
+            SELECT id, subtype, name, description, observations, entity_id, last_updated
             FROM mental_models
             WHERE id = $1 AND bank_id = $2
             """,
@@ -54,38 +54,58 @@ async def tool_lookup(
             bank_id,
         )
         if row:
+            # Parse observations JSON
+            obs_data = row["observations"] or {"observations": []}
+            if isinstance(obs_data, str):
+                import json
+
+                obs_data = json.loads(obs_data)
+            observations_raw = obs_data.get("observations", []) if isinstance(obs_data, dict) else obs_data
+
+            # Normalize observation format: map memory_ids/fact_ids to based_on
+            observations = []
+            for obs in observations_raw:
+                if isinstance(obs, dict):
+                    based_on = obs.get("memory_ids") or obs.get("fact_ids") or []
+                    observations.append(
+                        {
+                            "title": obs.get("title", ""),
+                            "text": obs.get("text", ""),
+                            "based_on": based_on,
+                        }
+                    )
+
             return {
                 "found": True,
                 "model": {
                     "id": row["id"],
-                    "type": row["type"],
                     "subtype": row["subtype"],
                     "name": row["name"],
                     "description": row["description"],
-                    "summary": row["summary"],
+                    "observations": observations,  # [{title, text, based_on}, ...]
                     "entity_id": str(row["entity_id"]) if row["entity_id"] else None,
-                    "triggers": row["triggers"] or [],
                     "last_updated": row["last_updated"].isoformat() if row["last_updated"] else None,
                 },
             }
         return {"found": False, "model_id": model_id}
     else:
-        # List all mental models (name + description only for efficiency)
+        # List all mental models (compact: id, name, description only)
+        # Full observations are retrieved via get_mental_model(model_id)
         rows = await conn.fetch(
             """
-            SELECT id, type, subtype, name, description
+            SELECT id, subtype, name, description
             FROM mental_models
             WHERE bank_id = $1
             ORDER BY last_updated DESC NULLS LAST, created_at DESC
             """,
             bank_id,
         )
+
         return {
             "count": len(rows),
             "models": [
                 {
                     "id": row["id"],
-                    "type": row["type"],
                     "subtype": row["subtype"],
                     "name": row["name"],
                     "description": row["description"],
@@ -100,52 +120,57 @@ async def tool_recall(
     bank_id: str,
     query: str,
     request_context: "RequestContext",
-    max_results: int = 20,
+    max_tokens: int = 2048,
+    max_results: int = 50,
     tags: list[str] | None = None,
     tags_match: str = "any",
+    connection_budget: int = 1,
 ) -> dict[str, Any]:
     """
-    Search facts using TEMPR retrieval.
+    Search memories using TEMPR retrieval.
 
     Args:
         memory_engine: Memory engine instance
         bank_id: Bank identifier
         query: Search query
         request_context: Request context for authentication
+        max_tokens: Maximum tokens for results (default 2048)
         max_results: Maximum number of results
         tags: Filter by tags (includes untagged memories)
         tags_match: How to match tags - "any" (OR), "all" (AND), or "exact"
+        connection_budget: Max DB connections for this recall (default 1 for internal ops)
 
     Returns:
-        Dict with list of matching facts
+        Dict with list of matching memories
     """
     result = await memory_engine.recall_async(
         bank_id=bank_id,
         query=query,
         fact_type=["experience", "world"],  # Exclude opinions
-        max_tokens=4000,
+        max_tokens=max_tokens,
         enable_trace=False,
         request_context=request_context,
         tags=tags,
         tags_match=tags_match,
+        _connection_budget=connection_budget,
     )
 
-    facts = []
-    for f in result.results[:max_results]:
-        facts.append(
+    memories = []
+    for m in result.results[:max_results]:
+        memories.append(
             {
-                "id": str(f.id),
-                "text": f.text,
-                "type": f.fact_type,
-                "entities": f.entities or [],
-                "occurred": f.occurred_start,  # Already ISO format string
+                "id": str(m.id),
+                "text": m.text,
+                "type": m.fact_type,
+                "entities": m.entities or [],
+                "occurred": m.occurred_start,  # Already ISO format string
             }
         )
 
     return {
         "query": query,
-        "count": len(facts),
-        "facts": facts,
+        "count": len(memories),
+        "memories": memories,
     }
 
 
@@ -156,16 +181,19 @@ async def tool_learn(
     tags: list[str] | None = None,
 ) -> dict[str, Any]:
     """
-    Create or update a mental model with subtype='learned'.
+    Create a mental model placeholder with subtype='learned'.
+
+    The agent only specifies name and description - actual observations are generated
+    in the background via refresh, similar to pinned models.
 
     Args:
         conn: Database connection
         bank_id: Bank identifier
-        input: Mental model input data
+        input: Mental model input data (name, description, optional entity_id)
         tags: Tags to apply to new mental models (from reflect context)
 
     Returns:
-        Dict with created/updated model info
+        Dict with created model info including model_id for background generation
     """
     model_id = generate_model_id(input.name)
 
@@ -185,154 +213,182 @@ async def tool_learn(
     )
 
     if existing:
-        # Update existing model (keep existing tags)
+        # Update description only - observations will be regenerated
         await conn.execute(
             """
             UPDATE mental_models SET
                 description = $3,
-                summary = $4,
-                triggers = $5,
-                entity_id = $6,
-                last_updated = NOW()
+                entity_id = $4
             WHERE id = $1 AND bank_id = $2
             """,
             model_id,
             bank_id,
             input.description,
-            input.summary,
-            input.triggers,
             entity_uuid,
         )
         status = "updated"
     else:
-        # Insert new model with tags from reflect context
+        # Insert new model placeholder - observations will be generated in background
         await conn.execute(
             """
-            INSERT INTO mental_models (id, bank_id, type, subtype, name, description, summary, triggers, entity_id, tags, last_updated, created_at)
-            VALUES ($1, $2, $3, 'learned', $4, $5, $6, $7, $8, $9, NOW(), NOW())
+            INSERT INTO mental_models (id, bank_id, subtype, name, description, observations, entity_id, tags, created_at)
+            VALUES ($1, $2, 'learned', $3, $4, '{}'::jsonb, $5, $6, NOW())
             """,
             model_id,
             bank_id,
-            input.type.value,
             input.name,
             input.description,
-            input.summary,
-            input.triggers,
             entity_uuid,
             tags or [],
         )
         status = "created"
 
-    logger.info(f"[REFLECT] Mental model '{model_id}' {status} in bank {bank_id}")
+    logger.info(f"[REFLECT] Mental model '{model_id}' {status} in bank {bank_id} - pending background generation")
 
     return {
         "status": status,
         "model_id": model_id,
         "name": input.name,
-        "type": input.type.value,
+        "pending_generation": True,
     }
 
 
 async def tool_expand(
     conn: "Connection",
     bank_id: str,
-    memory_id: str,
+    memory_ids: list[str],
     depth: str,
 ) -> dict[str, Any]:
     """
-    Expand a memory to get chunk or document context.
+    Expand multiple memories to get chunk or document context.
 
     Args:
         conn: Database connection
         bank_id: Bank identifier
-        memory_id: Memory unit ID
+        memory_ids: List of memory unit IDs
         depth: "chunk" or "document"
 
     Returns:
-        Dict with memory, chunk, and optionally document data
+        Dict with results array, each containing memory, chunk, and optionally document data
     """
-    try:
-        mem_uuid = uuid.UUID(memory_id)
-    except ValueError:
-        return {"error": f"Invalid memory_id format: {memory_id}"}
+    if not memory_ids:
+        return {"error": "memory_ids is required and must not be empty"}
 
-    # Get memory unit
-    memory = await conn.fetchrow(
+    # Validate and convert UUIDs
+    valid_uuids: list[uuid.UUID] = []
+    errors: dict[str, str] = {}
+    for mid in memory_ids:
+        try:
+            valid_uuids.append(uuid.UUID(mid))
+        except ValueError:
+            errors[mid] = f"Invalid memory_id format: {mid}"
+
+    if not valid_uuids:
+        return {"error": "No valid memory IDs provided", "details": errors}
+
+    # Batch fetch all memory units
+    memories = await conn.fetch(
         """
         SELECT id, text, chunk_id, document_id, fact_type, context
         FROM memory_units
-        WHERE id = $1 AND bank_id = $2
+        WHERE id = ANY($1) AND bank_id = $2
         """,
-        mem_uuid,
+        valid_uuids,
         bank_id,
     )
+    memory_map = {row["id"]: row for row in memories}
 
-    if not memory:
-        return {"error": f"Memory not found: {memory_id}"}
+    # Collect chunk_ids and document_ids for batch fetching
+    chunk_ids = [m["chunk_id"] for m in memories if m["chunk_id"]]
+    doc_ids_from_chunks: set[str] = set()
+    doc_ids_direct: set[str] = set()
 
-    result: dict[str, Any] = {
-        "memory": {
-            "id": str(memory["id"]),
-            "text": memory["text"],
-            "type": memory["fact_type"],
-            "context": memory["context"],
-        }
-    }
-
-    # Get chunk if available
-    if memory["chunk_id"]:
-        chunk = await conn.fetchrow(
+    # Batch fetch all chunks
+    chunk_map: dict[str, Any] = {}
+    if chunk_ids:
+        chunks = await conn.fetch(
             """
             SELECT chunk_id, chunk_text, chunk_index, document_id
             FROM chunks
-            WHERE chunk_id = $1
+            WHERE chunk_id = ANY($1)
             """,
-            memory["chunk_id"],
+            chunk_ids,
         )
-        if chunk:
-            result["chunk"] = {
+        chunk_map = {row["chunk_id"]: row for row in chunks}
+        if depth == "document":
+            doc_ids_from_chunks = {c["document_id"] for c in chunks if c["document_id"]}
+
+    # Collect direct document IDs (memories without chunks)
+    if depth == "document":
+        for m in memories:
+            if not m["chunk_id"] and m["document_id"]:
+                doc_ids_direct.add(m["document_id"])
+
+    # Batch fetch all documents
+    doc_map: dict[str, Any] = {}
+    all_doc_ids = list(doc_ids_from_chunks | doc_ids_direct)
+    if all_doc_ids:
+        docs = await conn.fetch(
+            """
+            SELECT id, original_text, metadata, retain_params
+            FROM documents
+            WHERE id = ANY($1) AND bank_id = $2
+            """,
+            all_doc_ids,
+            bank_id,
+        )
+        doc_map = {row["id"]: row for row in docs}
+
+    # Build results
+    results: list[dict[str, Any]] = []
+    for mid, mem_uuid in zip(memory_ids, valid_uuids):
+        if mid in errors:
+            results.append({"memory_id": mid, "error": errors[mid]})
+            continue
+
+        memory = memory_map.get(mem_uuid)
+        if not memory:
+            results.append({"memory_id": mid, "error": f"Memory not found: {mid}"})
+            continue
+
+        item: dict[str, Any] = {
+            "memory_id": mid,
+            "memory": {
+                "id": str(memory["id"]),
+                "text": memory["text"],
+                "type": memory["fact_type"],
+                "context": memory["context"],
+            },
+        }
+
+        # Add chunk if available
+        if memory["chunk_id"] and memory["chunk_id"] in chunk_map:
+            chunk = chunk_map[memory["chunk_id"]]
+            item["chunk"] = {
                 "id": chunk["chunk_id"],
                 "text": chunk["chunk_text"],
                 "index": chunk["chunk_index"],
                 "document_id": chunk["document_id"],
             }
-
-            # Get document if depth=document
-            if depth == "document" and chunk["document_id"]:
-                doc = await conn.fetchrow(
-                    """
-                    SELECT id, original_text, metadata, retain_params
-                    FROM documents
-                    WHERE id = $1 AND bank_id = $2
-                    """,
-                    chunk["document_id"],
-                    bank_id,
-                )
-                if doc:
-                    result["document"] = {
-                        "id": doc["id"],
-                        "full_text": doc["original_text"],
-                        "metadata": doc["metadata"],
-                        "retain_params": doc["retain_params"],
-                    }
-    elif memory["document_id"]:
-        # No chunk, but has document_id
-        if depth == "document":
-            doc = await conn.fetchrow(
-                """
-                SELECT id, original_text, metadata, retain_params
-                FROM documents
-                WHERE id = $1 AND bank_id = $2
-                """,
-                memory["document_id"],
-                bank_id,
-            )
-            if doc:
-                result["document"] = {
+            # Add document if depth=document
+            if depth == "document" and chunk["document_id"] in doc_map:
+                doc = doc_map[chunk["document_id"]]
+                item["document"] = {
                     "id": doc["id"],
                     "full_text": doc["original_text"],
                     "metadata": doc["metadata"],
                     "retain_params": doc["retain_params"],
                 }
+        elif memory["document_id"] and depth == "document" and memory["document_id"] in doc_map:
+            # No chunk, but has document_id
+            doc = doc_map[memory["document_id"]]
+            item["document"] = {
+                "id": doc["id"],
+                "full_text": doc["original_text"],
+                "metadata": doc["metadata"],
+                "retain_params": doc["retain_params"],
+            }
 
-    return result
+        results.append(item)
+
+    return {"results": results, "count": len(results)}

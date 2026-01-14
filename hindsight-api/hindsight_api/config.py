@@ -76,6 +76,7 @@ ENV_RECALL_MAX_CONCURRENT = "HINDSIGHT_API_RECALL_MAX_CONCURRENT"
 ENV_RECALL_CONNECTION_BUDGET = "HINDSIGHT_API_RECALL_CONNECTION_BUDGET"
 ENV_MCP_LOCAL_BANK_ID = "HINDSIGHT_API_MCP_LOCAL_BANK_ID"
 ENV_MCP_INSTRUCTIONS = "HINDSIGHT_API_MCP_INSTRUCTIONS"
+ENV_MENTAL_MODEL_REFRESH_CONCURRENCY = "HINDSIGHT_API_MENTAL_MODEL_REFRESH_CONCURRENCY"
 
 # Observation thresholds
 ENV_OBSERVATION_MIN_FACTS = "HINDSIGHT_API_OBSERVATION_MIN_FACTS"
@@ -148,6 +149,7 @@ DEFAULT_MPFP_TOP_K_NEIGHBORS = 20  # Fan-out limit per node in MPFP graph traver
 DEFAULT_RECALL_MAX_CONCURRENT = 32  # Max concurrent recall operations per worker
 DEFAULT_RECALL_CONNECTION_BUDGET = 4  # Max concurrent DB connections per recall operation
 DEFAULT_MCP_LOCAL_BANK_ID = "mcp"
+DEFAULT_MENTAL_MODEL_REFRESH_CONCURRENCY = 8  # Max concurrent mental model refreshes
 
 # Observation thresholds
 DEFAULT_OBSERVATION_MIN_FACTS = 5  # Min facts required to generate entity observations
@@ -267,6 +269,7 @@ class HindsightConfig:
     mpfp_top_k_neighbors: int
     recall_max_concurrent: int
     recall_connection_budget: int
+    mental_model_refresh_concurrency: int
 
     # Observation thresholds
     observation_min_facts: int
@@ -349,6 +352,9 @@ class HindsightConfig:
             recall_max_concurrent=int(os.getenv(ENV_RECALL_MAX_CONCURRENT, str(DEFAULT_RECALL_MAX_CONCURRENT))),
             recall_connection_budget=int(
                 os.getenv(ENV_RECALL_CONNECTION_BUDGET, str(DEFAULT_RECALL_CONNECTION_BUDGET))
+            ),
+            mental_model_refresh_concurrency=int(
+                os.getenv(ENV_MENTAL_MODEL_REFRESH_CONCURRENCY, str(DEFAULT_MENTAL_MODEL_REFRESH_CONCURRENCY))
             ),
             # Optimization flags
             skip_llm_verification=os.getenv(ENV_SKIP_LLM_VERIFICATION, "false").lower() == "true",

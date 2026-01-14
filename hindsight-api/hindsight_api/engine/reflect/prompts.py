@@ -2,86 +2,65 @@
 System prompts for the reflect agent.
 """
 
-# Tool descriptions
-_TOOL_LOOKUP = """### lookup(model_id?)
-Get mental models - your synthesized knowledge about entities, concepts, and events.
-- Without model_id: Lists all mental models (name + description only)
-- With model_id: Gets full details including summary"""
-
-_TOOL_RECALL = """### recall(query)
-Search facts using semantic + temporal retrieval. Returns relevant memories from experience and world knowledge."""
-
-_TOOL_LEARN = """### learn(name, type, description, summary, triggers, entity_id?)
-Store a new insight as a mental model. Use when you've synthesized understanding worth remembering.
-- name: Human-readable name
-- type: "entity", "concept", or "event"
-- description: One-liner for quick reference
-- summary: Full synthesized understanding
-- triggers: Keywords for retrieval
-- entity_id: Optional link to existing entity"""
-
-_TOOL_EXPAND = """### expand(memory_id, depth)
-Get more context for a memory.
-- depth="chunk": Returns the surrounding text chunk
-- depth="document": Returns the full source document"""
-
-_TOOL_DONE = """### done(answer)
-Signal completion with your final answer."""
+import json
+from typing import Any
 
 
-def build_system_prompt(enable_learn: bool = True) -> str:
-    """Build the system prompt with optional learn tool."""
-    tools = [_TOOL_LOOKUP, _TOOL_RECALL]
-    if enable_learn:
-        tools.append(_TOOL_LEARN)
-    tools.extend([_TOOL_EXPAND, _TOOL_DONE])
+def build_system_prompt_for_tools(bank_profile: dict[str, Any], context: str | None = None) -> str:
+    """
+    Build the system prompt for tool-calling reflect agent.
 
-    learn_goal = "- When you learn something new worth remembering, use the learn tool\n" if enable_learn else ""
+    This is a simplified prompt since tools are defined separately via the tools parameter.
+    """
+    name = bank_profile.get("name", "Assistant")
+    mission = bank_profile.get("mission", "")
 
-    return f"""You are a reflection agent that answers questions ONLY using information retrieved from tools.
+    parts = [
+        "You are a reflection agent that answers questions by reasoning over retrieved memories.",
+        "",
+        "## CRITICAL RULES",
+        "- You must NEVER fabricate information that has no basis in retrieved data",
+        "- You SHOULD synthesize, infer, and reason from the retrieved memories",
+        "- You MUST call recall() before saying you don't have information",
+        "- Only say 'I don't have information' AFTER trying list_mental_models AND recall with no relevant results",
+        "",
+        "## How to Reason",
+        "- If memories mention someone did an activity, you can infer they likely enjoyed it",
+        "- Synthesize a coherent narrative from related memories",
+        "- Be a thoughtful interpreter, not just a literal repeater",
+        "- When the exact answer isn't stated, use what IS stated to give the best answer",
+        "",
+        "## Workflow",
+        "1. Call list_mental_models() to see available pre-synthesized knowledge",
+        "2. If relevant, call get_mental_model(model_id) for full details",
+        "3. Use recall(query) for specific details not in mental models",
+        "4. Try multiple recall queries with different phrasings if needed",
+        "5. Use expand() if you need more context on specific memories",
+        "6. When ready, call done() with your answer and supporting memory_ids",
+        "",
+        f"## Memory Bank: {name}",
+    ]
 
-## CRITICAL RULES
-- You must NEVER make up or hallucinate information
-- Your answers must be based ONLY on data returned by the tools
-- You MUST call recall() before saying you don't have information - mental models alone are not enough
-- Only say "I don't have information about this" AFTER trying both lookup AND recall with no relevant results
+    if mission:
+        parts.append(f"Mission: {mission}")
 
-## Available Tools
+    # Disposition traits
+    disposition = bank_profile.get("disposition", {})
+    if disposition:
+        traits = []
+        if "skepticism" in disposition:
+            traits.append(f"skepticism={disposition['skepticism']}")
+        if "literalism" in disposition:
+            traits.append(f"literalism={disposition['literalism']}")
+        if "empathy" in disposition:
+            traits.append(f"empathy={disposition['empathy']}")
+        if traits:
+            parts.append(f"Disposition: {', '.join(traits)}")
 
-{chr(10).join(tools)}
+    if context:
+        parts.append(f"\n## Additional Context\n{context}")
 
-## Workflow
-
-1. Check if a mental model in the context matches the question exactly - if so, use lookup(model_id) to get its summary
-2. If no mental model matches OR you need more details: ALWAYS call recall(query) to search for facts
-3. Try multiple recall queries with different phrasings if the first doesn't find what you need
-4. Use expand(memory_id, depth) if you need more context on a specific fact
-{learn_goal}5. When ready, use done(answer) with your response based ONLY on retrieved data
-
-IMPORTANT: Even if no mental model matches, you MUST try recall() before concluding you don't have information.
-
-## Response Format
-
-Respond with JSON containing an "actions" array:
-
-{{
-  "actions": [
-    {{"tool": "lookup", "reasoning": "Check for matching mental model"}},
-    {{"tool": "recall", "query": "specific search query", "reasoning": "Search for facts"}}
-  ]
-}}
-
-When done:
-{{
-  "actions": [
-    {{"tool": "done", "answer": "Based on the retrieved information: ..."}}
-  ]
-}}
-"""
-
-
-# Default system prompt with learn enabled (for backward compatibility)
-REFLECT_AGENT_SYSTEM_PROMPT = build_system_prompt(enable_learn=True)
+    return "\n".join(parts)
 
 
 def build_agent_prompt(
@@ -95,14 +74,11 @@ def build_agent_prompt(
 
     # Bank identity
     name = bank_profile.get("name", "Assistant")
-    background = bank_profile.get("background", "")
-    goal = bank_profile.get("goal", "")
+    mission = bank_profile.get("mission", "")
 
     parts.append(f"## Memory Bank Context\nName: {name}")
-    if background:
-        parts.append(f"Background: {background}")
-    if goal:
-        parts.append(f"Goal: {goal}")
+    if mission:
+        parts.append(f"Mission: {mission}")
 
     # Disposition traits if present
     disposition = bank_profile.get("disposition", {})
@@ -123,14 +99,15 @@ def build_agent_prompt(
 
     # Tool call history
     if context_history:
-        parts.append("\n## Tool Results (use ONLY this data for your answer)")
+        parts.append("\n## Tool Results (synthesize and reason from this data)")
         for i, entry in enumerate(context_history, 1):
             tool = entry["tool"]
             output = entry["output"]
-            # Truncate long outputs
-            output_str = str(output)
-            if len(output_str) > 2000:
-                output_str = output_str[:2000] + "... (truncated)"
+            # Format as proper JSON for LLM readability
+            try:
+                output_str = json.dumps(output, indent=2, default=str)
+            except (TypeError, ValueError):
+                output_str = str(output)
             parts.append(f"\n### Call {i}: {tool}\n```json\n{output_str}\n```")
 
     # The question
@@ -141,14 +118,15 @@ def build_agent_prompt(
         parts.append(
             "\n## Instructions\n"
             "Based on the tool results above, either call more tools or provide your final answer. "
-            "Your answer must be grounded ONLY in the data shown above - do not add information you don't have."
+            "Synthesize and reason from the data - make reasonable inferences when helpful. "
+            "If you have related information, use it to give the best possible answer."
         )
     else:
         parts.append(
             "\n## Instructions\n"
-            "Check if any mental model above matches your question. If so, use lookup(model_id) to get details. "
-            "If no mental model matches, you MUST call recall(query) to search for facts. "
-            "Never answer without first trying recall() - it searches all stored memories."
+            "Start by calling list_mental_models() to see available mental models - they contain pre-synthesized knowledge. "
+            "If a relevant model exists, use get_mental_model(model_id) to get its observations. "
+            "Then use recall(query) for specific details not covered by mental models."
         )
 
     return "\n".join(parts)
@@ -165,14 +143,11 @@ def build_final_prompt(
 
     # Bank identity
     name = bank_profile.get("name", "Assistant")
-    background = bank_profile.get("background", "")
-    goal = bank_profile.get("goal", "")
+    mission = bank_profile.get("mission", "")
 
     parts.append(f"## Memory Bank Context\nName: {name}")
-    if background:
-        parts.append(f"Background: {background}")
-    if goal:
-        parts.append(f"Goal: {goal}")
+    if mission:
+        parts.append(f"Mission: {mission}")
 
     # Disposition traits if present
     disposition = bank_profile.get("disposition", {})
@@ -193,14 +168,16 @@ def build_final_prompt(
 
     # Tool call history
     if context_history:
-        parts.append("\n## Retrieved Data (use ONLY this for your answer)")
+        parts.append("\n## Retrieved Data (synthesize and reason from this data)")
         for entry in context_history:
             tool = entry["tool"]
             output = entry["output"]
-            output_str = str(output)
-            if len(output_str) > 2000:
-                output_str = output_str[:2000] + "... (truncated)"
-            parts.append(f"\n### From {tool}:\n{output_str}")
+            # Format as proper JSON for LLM readability
+            try:
+                output_str = json.dumps(output, indent=2, default=str)
+            except (TypeError, ValueError):
+                output_str = str(output)
+            parts.append(f"\n### From {tool}:\n```json\n{output_str}\n```")
     else:
         parts.append("\n## Retrieved Data\nNo data was retrieved.")
 
@@ -210,14 +187,22 @@ def build_final_prompt(
     # Final instructions
     parts.append(
         "\n## Instructions\n"
-        "Provide your answer based ONLY on the retrieved data above. "
-        "Do not make up or hallucinate any information. "
-        "If no relevant data was found, say 'I don't have information about this topic.'"
+        "Provide a thoughtful answer by synthesizing and reasoning from the retrieved data above. "
+        "You can make reasonable inferences from the memories, but don't completely fabricate information."
+        "If the exact answer isn't stated, use what IS stated to give the best possible answer. "
+        "Only say 'I don't have information' if the retrieved data is truly unrelated to the question."
     )
 
     return "\n".join(parts)
 
 
-FINAL_SYSTEM_PROMPT = """You are a grounded assistant that answers ONLY based on retrieved data.
-CRITICAL: Never hallucinate or make up information. Only use the data shown in the prompt.
-If no relevant data exists, clearly state that you don't have information about this topic."""
+FINAL_SYSTEM_PROMPT = """You are a thoughtful assistant that synthesizes answers from retrieved memories.
+
+Your approach:
+- Reason over the retrieved memories to answer the question
+- Make reasonable inferences when the exact answer isn't explicitly stated
+- Connect related memories to form a complete picture
+- Be helpful - if you have related information, use it to give the best possible answer
+
+Only say "I don't have information" if the retrieved data is truly unrelated to the question.
+Do NOT fabricate information that has no basis in the retrieved data."""

@@ -4,15 +4,15 @@ sidebar_position: 3
 
 # Reflect
 
-Generate disposition-aware responses using retrieved memories.
+Generate disposition-aware responses using an **agentic loop** that dynamically gathers information from your memory bank.
 
-When you call **reflect**, Hindsight performs a multi-step reasoning process:
-1. **Recalls** relevant memories from the bank based on your query
+When you call **reflect**, Hindsight launches an agent that:
+1. **Explores** your memory bank using tools (lookup, recall, expand)
 2. **Applies** the bank's disposition traits to shape the reasoning style
-3. **Generates** a contextual answer grounded in the retrieved facts
-4. **Forms opinions** in the background based on the reasoning (available in subsequent calls)
+3. **Learns** new insights as mental models when warranted
+4. **Generates** a contextual answer grounded in the retrieved facts
 
-The response includes the generated answer along with the facts that were used, providing full transparency into how the answer was derived.
+The agent iterates up to 10 times, deciding what information to retrieve at each step.
 
 import Tabs from '@theme/Tabs';
 import TabItem from '@theme/TabItem';
@@ -24,7 +24,7 @@ import reflectMjs from '!!raw-loader!@site/examples/api/reflect.mjs';
 import reflectSh from '!!raw-loader!@site/examples/api/reflect.sh';
 
 :::info How Reflect Works
-Learn about disposition-driven reasoning and opinion formation in the [Reflect Architecture](/developer/reflect) guide.
+Learn about the agentic reflect and disposition-driven reasoning in the [Reflect Architecture](/developer/reflect) guide.
 :::
 
 :::tip Prerequisites
@@ -50,24 +50,28 @@ Make sure you've completed the [Quick Start](./quickstart) to install the client
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `query` | string | required | Question or prompt |
-| `budget` | string | "low" | Budget level: "low", "mid", "high" |
-| `context` | string | None | Additional context for the query |
 | `max_tokens` | int | 4096 | Maximum tokens for the response |
-| `response_schema` | object | None | JSON Schema for [structured output](#structured-output) |
+| `tags` | array | None | Filter memories by tags |
+| `tags_match` | string | "any" | How to match tags: "any", "all", "any_strict", or "all_strict" |
+| `include` | object | None | Options for including debug traces (see below) |
+
+### Include Options
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `include.facts` | object | Include facts that support the answer. Set to `{}` to enable. |
+| `include.tool_calls` | object | Include tool call traces. Set to `{}` for full trace. |
+| `include.tool_calls.output` | bool | Include tool outputs (default: true). Set to `false` for smaller payload. |
 
 ### Response Fields
 
 | Field | Type | Description |
 |-------|------|-------------|
 | `text` | string | The generated answer text |
-| `based_on` | array | Facts used to generate the response |
-| `structured_output` | object | Parsed structured output (when `response_schema` provided) |
-| `usage` | TokenUsage | Token usage metrics for the LLM call |
-
-The `usage` field contains:
-- `input_tokens`: Number of input/prompt tokens consumed
-- `output_tokens`: Number of output/completion tokens generated
-- `total_tokens`: Sum of input and output tokens
+| `based_on` | array | Facts used (when `include.facts` is set) |
+| `tool_calls` | array | Tool call trace (when `include.tool_calls` is set) |
+| `llm_calls` | array | LLM call trace (when `include.tool_calls` is set) |
+| `mental_models` | array | Mental models accessed (when `include.facts` is set) |
 
 <Tabs>
 <TabItem value="python" label="Python">
@@ -78,34 +82,87 @@ The `usage` field contains:
 </TabItem>
 </Tabs>
 
-## The Role of Context
+## The Agent Loop
 
-The `context` parameter steers how the reflection is performed without impacting the memory recall. It provides situational information that helps shape the reasoning and response.
+The reflect agent iteratively uses tools to answer your query:
 
-**How context is used:**
-- **Shapes reasoning**: Helps understand the situation when formulating an answer
-- **Disambiguates intent**: Clarifies what aspect of the query matters most
-- **Does not affect recall**: The same memories are retrieved regardless of context
+| Tool | Purpose |
+|------|---------|
+| **lookup(model_id?)** | Get mental models — without ID lists all, with ID gets full details |
+| **recall(query, max_tokens?)** | Search facts using semantic + temporal retrieval (default 4096 tokens) |
+| **expand(memory_id, depth)** | Get surrounding context — depth is "chunk" or "document" |
+| **learn(name, description, entity_id?)** | Create a mental model placeholder to track a topic |
+| **done(sections)** | Signal completion with structured answer including fact/model citations |
+
+**Example agent flow:**
+```
+Query: "Should we hire Alice for the ML team?"
+
+Iteration 1:
+  lookup() → Lists all mental models
+  recall("Alice background experience", max_tokens=8000) → Gets relevant facts
+
+Iteration 2:
+  expand(fact_id, "document") → Gets full context on a key fact
+  learn(name="Alice", description="Senior ML engineer candidate") → Creates placeholder
+
+Iteration 3:
+  done(sections=[{title: "", text: "Based on Alice's ML expertise...", fact_ids: [...]}])
+```
+
+## Mental Model Learning
+
+During reflection, the agent may create new **mental models** when it discovers insights worth remembering. These become available for future queries.
+
+```python
+# After reflect(), check what was learned
+response = client.reflect(
+    bank_id="my-bank",
+    query="What do you know about the React migration?"
+)
+
+if response.mental_models_created:
+    print(f"Learned: {response.mental_models_created}")
+    # e.g., ["react-migration"]
+```
+
+Learn more about mental models in the [Mental Models](/developer/mental-models) guide.
+
+## Tag Filtering
+
+Filter which memories the agent can access using tags:
 
 <Tabs>
 <TabItem value="python" label="Python">
-<CodeSnippet code={reflectPy} section="reflect-with-context" language="python" />
+
+```python
+# Only consider engineering-related memories
+response = client.reflect(
+    bank_id="my-bank",
+    query="What are the key blockers for Q1?",
+    tags=["engineering", "q1-planning"],
+    tags_match="any"  # Match any of these tags
+)
+```
+
 </TabItem>
-<TabItem value="node" label="Node.js">
-<CodeSnippet code={reflectMjs} section="reflect-with-context" language="javascript" />
+<TabItem value="cli" label="CLI">
+
+```bash
+hindsight memory reflect my-bank "What are the key blockers?" \
+  --tags engineering,q1-planning \
+  --tags-match any
+```
+
 </TabItem>
 </Tabs>
 
-## Opinion Formation
-
-When reflect reasons about a question, it may form new **opinions** based on the evidence in the memory bank. These opinions are created in the background and become available in subsequent `reflect` and `recall` calls.
-
-**Why opinions matter:**
-- **Consistent thinking**: Opinions ensure the memory bank maintains a coherent perspective over time
-- **Evolving viewpoints**: As more information is retained, opinions can be refined or updated
-- **Grounded reasoning**: Opinions are always derived from factual evidence in the memory bank
-
-Opinions are stored as a special memory type and are automatically retrieved when relevant to future queries. This creates a natural evolution of the bank's perspective, similar to how humans form and refine their views based on accumulated experience.
+| tags_match | Behavior |
+|------------|----------|
+| `any` | Match memories with ANY of the specified tags (OR) |
+| `all` | Match memories with ALL of the specified tags (AND) |
+| `any_strict` | Match memories that have ONLY specified tags, matching any |
+| `all_strict` | Match memories that have ONLY specified tags, matching all |
 
 ## Disposition Influence
 
@@ -126,124 +183,75 @@ The bank's disposition affects reflect responses:
 </TabItem>
 </Tabs>
 
-## Using Sources
+## Reasoning Behavior
 
-The `based_on` field shows which memories informed the response:
+The reflect agent is designed to **synthesize and reason** from retrieved data:
 
-<Tabs>
-<TabItem value="python" label="Python">
-<CodeSnippet code={reflectPy} section="reflect-sources" language="python" />
-</TabItem>
-<TabItem value="node" label="Node.js">
-<CodeSnippet code={reflectMjs} section="reflect-sources" language="javascript" />
-</TabItem>
-</Tabs>
+1. **Synthesize**: Connect related facts to form a complete picture
+2. **Infer**: Make reasonable inferences when the exact answer isn't stated
+3. **Always search**: Must call `recall()` before saying "I don't have information"
+4. **Be helpful**: Use related information to give the best possible answer
+5. **No fabrication**: Don't completely invent facts with no basis in retrieved data
 
-This enables:
-- **Transparency** — users see why the bank said something
-- **Verification** — check if the response is grounded in facts
-- **Debugging** — understand retrieval quality
+:::tip
+The agent is a thoughtful interpreter, not just a literal fact repeater. It will make reasonable inferences from the data to provide helpful answers.
+:::
 
-## Structured Output
+## HTTP API
 
-For applications that need to process responses programmatically, you can request structured output by providing a JSON Schema via `response_schema`. When provided, the response includes a `structured_output` field with the LLM response parsed according to the schema. The `text` field will be empty since only a single LLM call is made for efficiency.
+**Endpoint:** `POST /v1/default/banks/{bank_id}/reflect`
 
-The easiest way to define a schema is using **Pydantic models**:
-
-<Tabs>
-<TabItem value="python" label="Python">
-
-```python
-from pydantic import BaseModel
-from hindsight_client import Hindsight
-
-# Define your response structure with Pydantic
-class HiringRecommendation(BaseModel):
-    recommendation: str
-    confidence: str  # "low", "medium", "high"
-    key_factors: list[str]
-    risks: list[str] = []
-
-with Hindsight() as client:
-    response = client.reflect(
-        bank_id="hiring-team",
-        query="Should we hire Alice for the ML team lead position?",
-        response_schema=HiringRecommendation.model_json_schema(),
-    )
-
-    # Parse structured output into Pydantic model
-    result = HiringRecommendation.model_validate(response.structured_output)
-    print(f"Recommendation: {result.recommendation}")
-    print(f"Confidence: {result.confidence}")
-    print(f"Key factors: {result.key_factors}")
-```
-
-</TabItem>
-<TabItem value="node" label="Node.js">
-
-```javascript
-import { Hindsight } from "@anthropic-ai/hindsight";
-
-const client = new Hindsight();
-
-// Define JSON schema directly
-const responseSchema = {
-  type: "object",
-  properties: {
-    recommendation: { type: "string" },
-    confidence: { type: "string", enum: ["low", "medium", "high"] },
-    key_factors: { type: "array", items: { type: "string" } },
-    risks: { type: "array", items: { type: "string" } },
-  },
-  required: ["recommendation", "confidence", "key_factors"],
-};
-
-const response = await client.reflect({
-  bankId: "hiring-team",
-  query: "Should we hire Alice for the ML team lead position?",
-  responseSchema: responseSchema,
-});
-
-// Structured output
-console.log(response.structuredOutput.recommendation);
-console.log(response.structuredOutput.keyFactors);
-```
-
-</TabItem>
-<TabItem value="cli" label="CLI">
-
-First, create a JSON schema file `schema.json`:
+**Basic Request:**
 ```json
 {
-  "type": "object",
-  "properties": {
-    "recommendation": {"type": "string"},
-    "confidence": {"type": "string", "enum": ["low", "medium", "high"]},
-    "key_factors": {"type": "array", "items": {"type": "string"}}
-  },
-  "required": ["recommendation", "confidence", "key_factors"]
+  "query": "Should we hire Alice for the ML team?",
+  "max_tokens": 4096,
+  "tags": ["engineering"],
+  "tags_match": "any"
 }
 ```
 
-Then use the `--schema` flag:
-```bash
-hindsight memory reflect hiring-team \
-  "Should we hire Alice for the ML team lead position?" \
-  --schema schema.json
+**Request with Debug Traces:**
+```json
+{
+  "query": "What do you know about the React migration?",
+  "include": {
+    "tool_calls": {},
+    "facts": {}
+  }
+}
 ```
 
-</TabItem>
-</Tabs>
+**Basic Response:**
+```json
+{
+  "text": "## Overview\nBased on Alice's ML expertise...\n\n## Key Qualifications\nShe has 5 years of experience..."
+}
+```
 
-| Use Case | Why Structured Output Helps |
-|----------|----------------------------|
-| **Decision pipelines** | Parse recommendations into workflow systems |
-| **Dashboards** | Extract confidence scores, risk factors for visualization |
-| **Multi-agent systems** | Pass structured data between agents |
-| **Auditing** | Log structured decisions with clear reasoning |
+**Response with Traces:**
+```json
+{
+  "text": "Based on Alice's ML expertise...",
+  "tool_calls": [
+    {"tool": "lookup", "input": {}, "output": {"models": [...]}, "duration_ms": 45},
+    {"tool": "recall", "input": {"query": "Alice"}, "output": {"facts": [...]}, "duration_ms": 120}
+  ],
+  "llm_calls": [
+    {"scope": "agent_1", "duration_ms": 450},
+    {"scope": "final", "duration_ms": 320}
+  ],
+  "mental_models": [
+    {"id": "alice", "name": "Alice Chen", "subtype": "emergent", "description": "Senior ML engineer"}
+  ],
+  "based_on": [
+    {"id": "uuid-1", "text": "Alice joined from Google in 2023", "type": "world"}
+  ]
+}
+```
 
-**Tips:**
-- Use Pydantic's `model_json_schema()` for type-safe schema generation
-- Use `model_validate()` to parse the response back into your Pydantic model
-- Keep schemas focused — extract only what you need
-- Use `Optional` fields for data that may not always be available
+## Next Steps
+
+- [**Reflect Architecture**](/developer/reflect) — Deep dive into how agentic reflect works
+- [**Mental Models**](/developer/mental-models) — Understanding synthesized knowledge
+- [**Recall**](./recall) — Direct fact retrieval without reasoning

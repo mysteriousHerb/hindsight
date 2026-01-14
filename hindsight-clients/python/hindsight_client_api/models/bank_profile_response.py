@@ -17,7 +17,7 @@ import pprint
 import re  # noqa: F401
 import json
 
-from pydantic import BaseModel, ConfigDict, StrictStr
+from pydantic import BaseModel, ConfigDict, Field, StrictStr
 from typing import Any, ClassVar, Dict, List, Optional
 from hindsight_client_api.models.disposition_traits import DispositionTraits
 from typing import Optional, Set
@@ -30,9 +30,9 @@ class BankProfileResponse(BaseModel):
     bank_id: StrictStr
     name: StrictStr
     disposition: DispositionTraits
-    background: StrictStr
-    goal: Optional[StrictStr] = None
-    __properties: ClassVar[List[str]] = ["bank_id", "name", "disposition", "background", "goal"]
+    mission: StrictStr = Field(description="The agent's mission - who they are and what they're trying to accomplish")
+    background: Optional[StrictStr] = None
+    __properties: ClassVar[List[str]] = ["bank_id", "name", "disposition", "mission", "background"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -76,10 +76,10 @@ class BankProfileResponse(BaseModel):
         # override the default output from pydantic by calling `to_dict()` of disposition
         if self.disposition:
             _dict['disposition'] = self.disposition.to_dict()
-        # set to None if goal (nullable) is None
+        # set to None if background (nullable) is None
         # and model_fields_set contains the field
-        if self.goal is None and "goal" in self.model_fields_set:
-            _dict['goal'] = None
+        if self.background is None and "background" in self.model_fields_set:
+            _dict['background'] = None
 
         return _dict
 
@@ -96,8 +96,8 @@ class BankProfileResponse(BaseModel):
             "bank_id": obj.get("bank_id"),
             "name": obj.get("name"),
             "disposition": DispositionTraits.from_dict(obj["disposition"]) if obj.get("disposition") is not None else None,
-            "background": obj.get("background"),
-            "goal": obj.get("goal")
+            "mission": obj.get("mission"),
+            "background": obj.get("background")
         })
         return _obj
 

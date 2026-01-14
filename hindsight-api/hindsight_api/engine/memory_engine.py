@@ -146,9 +146,12 @@ from .response_models import (
     VALID_RECALL_FACT_TYPES,
     EntityObservation,
     EntityState,
+    LLMCallTrace,
     MemoryFact,
+    MentalModelRef,
     ReflectResult,
     TokenUsage,
+    ToolCallTrace,
 )
 from .response_models import RecallResult as RecallResultModel
 from .retain import bank_utils, embedding_utils
@@ -534,19 +537,26 @@ class MemoryEngine(MemoryEngineInterface):
         Handler for refresh mental models tasks.
 
         This is the main background job that:
-        1. Identifies mental models (structural from goal + emergent from entities)
+        1. Identifies mental models (structural from mission + emergent from entities)
         2. Generates summaries for each mental model
 
         Args:
-            task_dict: Dict with 'bank_id', 'operation_id', optional 'tags'
+            task_dict: Dict with 'bank_id', 'operation_id', optional 'tags', optional 'subtype'
         """
+        import time
+
         bank_id = task_dict.get("bank_id")
         operation_id = task_dict.get("operation_id")
         tags = task_dict.get("tags")  # Tags to apply to created mental models
+        subtype = task_dict.get("subtype")  # Optional filter: "structural", "emergent", "pinned", or "learned"
         if not bank_id:
             raise ValueError("bank_id is required for refresh mental models task")
 
-        logger.info(f"[MENTAL_MODELS_TASK] Starting refresh for bank_id={bank_id}, operation_id={operation_id}")
+        refresh_structural = subtype is None or subtype == "structural"
+        refresh_emergent = subtype is None or subtype == "emergent"
+        refresh_pinned = subtype is None or subtype == "pinned"
+        refresh_learned = subtype is None or subtype == "learned"
+        subtype_desc = f" (subtype={subtype})" if subtype else " (all)"
 
         from hindsight_api.models import RequestContext
 
@@ -556,79 +566,231 @@ class MemoryEngine(MemoryEngineInterface):
         from .mental_models.emergent import (
             detect_entity_candidates,
             evaluate_emergent_models,
-            filter_candidates_by_goal,
+            filter_candidates_by_mission,
         )
 
-        # Phase 1: Identify mental models
-        logger.info(f"[MENTAL_MODELS_TASK] Phase 1: Identifying mental models for bank {bank_id}")
+        # ===== Phase 1: Identify mental models (with buffered logging) =====
+        phase1_start = time.perf_counter()
+        id_log: list[str] = []  # Log buffer for identification phase
 
-        # Step 1: Get the bank's goal (required - should have been validated before scheduling)
-        goal = await self.get_bank_goal(bank_id, request_context=internal_context)
-        if not goal:
-            raise ValueError(f"Cannot refresh mental models: no goal is set for bank '{bank_id}'")
+        # Step 1: Get the bank's mission (required - should have been validated before scheduling)
+        profile = await self.get_bank_profile(bank_id, request_context=internal_context)
+        mission = profile.get("mission") or ""
+        if not mission:
+            raise ValueError(f"Cannot refresh mental models: no mission is set for bank '{bank_id}'")
+
+        structural_removed: list[str] = []
+        emergent_removed: list[str] = []
+        emergent_promoted: list[str] = []
 
         # Step 2: Derive structural models (LLM sees existing ones and decides what to keep)
-        existing_structural = await self.list_mental_models(
-            bank_id, subtype="structural", request_context=internal_context
-        )
-        logger.info(
-            f"[MENTAL_MODELS_TASK] Deriving structural models "
-            f"(existing: {len(existing_structural) if existing_structural else 0}, tags: {tags})"
-        )
-        models_to_remove = await self._derive_structural_models_internal(
-            bank_id, goal, pool, existing_models=existing_structural, tags=tags
-        )
-        for model_id in models_to_remove:
-            logger.info(f"[MENTAL_MODELS_TASK] Removing stale structural model: {model_id}")
-            await self.delete_mental_model(bank_id, model_id, request_context=internal_context)
+        if refresh_structural:
+            existing_structural = await self.list_mental_models(
+                bank_id, subtype="structural", request_context=internal_context
+            )
+            id_log.append(f"structural: {len(existing_structural) if existing_structural else 0} existing")
+            models_to_remove = await self._derive_structural_models_internal(
+                bank_id, mission, pool, existing_models=existing_structural, tags=tags
+            )
+            for model_id in models_to_remove:
+                structural_removed.append(model_id)
+                await self.delete_mental_model(bank_id, model_id, request_context=internal_context)
+            if structural_removed:
+                id_log.append(f"structural removed: {structural_removed}")
+        else:
+            id_log.append("structural: skipped (subtype filter)")
 
         # Step 3: Evaluate existing emergent models
-        # (remove generic/abstract entities that shouldn't be mental models)
-        existing_emergent = await self.list_mental_models(bank_id, subtype="emergent", request_context=internal_context)
-        if existing_emergent:
-            logger.info(f"[MENTAL_MODELS_TASK] Evaluating {len(existing_emergent)} existing emergent models")
-            models_to_remove = await evaluate_emergent_models(self._llm_config, existing_emergent)
-            for model_id in models_to_remove:
-                logger.info(f"[MENTAL_MODELS_TASK] Removing invalid emergent model: {model_id}")
-                await self.delete_mental_model(bank_id, model_id, request_context=internal_context)
+        removed_entity_ids: set[str] = set()  # Track entity_ids we removed (to prevent re-promotion)
+        if refresh_emergent:
+            existing_emergent = await self.list_mental_models(
+                bank_id, subtype="emergent", request_context=internal_context
+            )
+            if existing_emergent:
+                id_log.append(f"emergent: {len(existing_emergent)} existing")
+                # Build model_id -> entity_id mapping for tracking
+                model_to_entity = {m["id"]: m.get("entity_id") for m in existing_emergent}
+                models_to_remove = await evaluate_emergent_models(self._llm_config, existing_emergent)
+                for model_id in models_to_remove:
+                    emergent_removed.append(model_id)
+                    # Track the entity_id so we don't re-promote it
+                    entity_id = model_to_entity.get(model_id)
+                    if entity_id:
+                        removed_entity_ids.add(str(entity_id))
+                    await self.delete_mental_model(bank_id, model_id, request_context=internal_context)
+                if emergent_removed:
+                    id_log.append(f"emergent removed: {emergent_removed}")
+            else:
+                id_log.append("emergent: 0 existing")
 
-        # Step 4: Detect emergent candidates (entities worth promoting)
-        logger.info("[MENTAL_MODELS_TASK] Detecting emergent candidates")
-        candidates = await detect_entity_candidates(pool, bank_id)
+            # Step 4: Detect emergent candidates (entities worth promoting)
+            candidates = await detect_entity_candidates(pool, bank_id)
+            id_log.append(f"emergent candidates detected: {len(candidates)}")
 
-        # Step 5: Filter candidates by goal relevance
-        if candidates and goal:
-            logger.info(f"[MENTAL_MODELS_TASK] Filtering {len(candidates)} candidates by goal relevance")
-            candidates = await filter_candidates_by_goal(self._llm_config, goal, candidates)
+            # Step 5: Filter candidates by mission relevance
+            if candidates and mission:
+                candidates = await filter_candidates_by_mission(self._llm_config, mission, candidates)
+                id_log.append(f"emergent candidates after mission filter: {len(candidates)}")
 
-        # Step 6: Promote filtered candidates to mental models (with tags if provided)
-        for candidate in candidates:
-            if candidate.entity_id:
-                logger.info(f"[MENTAL_MODELS_TASK] Promoting entity {candidate.name} to mental model (tags: {tags})")
-                await self._promote_entity_internal(bank_id, candidate.entity_id, pool, tags=tags)
+            # Step 6: Filter out candidates whose entity was just removed (they failed evaluation)
+            if removed_entity_ids:
+                original_count = len(candidates)
+                candidates = [c for c in candidates if c.entity_id not in removed_entity_ids]
+                if len(candidates) < original_count:
+                    id_log.append(f"emergent excluded (failed evaluation): {original_count - len(candidates)}")
 
-        # Phase 2: Generate summaries for all mental models
-        logger.info("[MENTAL_MODELS_TASK] Phase 2: Generating summaries")
-        models = await self.list_mental_models(bank_id, request_context=internal_context)
-        structural_names = [m["name"] for m in models if m["subtype"] == "structural"]
-        emergent_names = [m["name"] for m in models if m["subtype"] == "emergent"]
+            # Step 7: Promote filtered candidates to mental models (with tags if provided)
+            for candidate in candidates:
+                if candidate.entity_id:
+                    emergent_promoted.append(candidate.name)
+                    await self._promote_entity_internal(bank_id, candidate.entity_id, pool, tags=tags)
+            if emergent_promoted:
+                id_log.append(f"emergent promoted: {emergent_promoted}")
+        else:
+            id_log.append("emergent: skipped (subtype filter)")
+
+        phase1_duration_ms = int((time.perf_counter() - phase1_start) * 1000)
+
+        # Output single log for Phase 1
         logger.info(
-            f"[MENTAL_MODELS_TASK] Generating summaries for {len(models)} mental models: "
-            f"structural={structural_names}, emergent={emergent_names}"
+            f"[MENTAL_MODELS] Identification complete for bank={bank_id}{subtype_desc} "
+            f"in {phase1_duration_ms}ms: {', '.join(id_log)}"
         )
 
-        for i, model in enumerate(models, 1):
-            logger.info(f"[MENTAL_MODELS_TASK] Generating summary {i}/{len(models)}: {model['name']}")
-            try:
-                await self.refresh_mental_model(
-                    bank_id=bank_id,
-                    model_id=model["id"],
-                    request_context=internal_context,
-                )
-            except Exception as e:
-                logger.warning(f"[MENTAL_MODELS_TASK] Failed to generate summary for {model['name']}: {e}")
+        # ===== Phase 2: Generate summaries in parallel =====
+        models = await self.list_mental_models(bank_id, request_context=internal_context)
 
-        logger.info(f"[MENTAL_MODELS_TASK] Completed refresh for bank_id={bank_id}")
+        # Filter models to only those being refreshed based on subtype
+        models_to_refresh = []
+        for m in models:
+            model_subtype = m["subtype"]
+            if model_subtype == "structural" and refresh_structural:
+                models_to_refresh.append(m)
+            elif model_subtype == "emergent" and refresh_emergent:
+                models_to_refresh.append(m)
+            elif model_subtype == "pinned" and refresh_pinned:
+                models_to_refresh.append(m)
+            elif model_subtype == "learned" and refresh_learned:
+                models_to_refresh.append(m)
+
+        # Get concurrency limit from config
+        from ..config import get_config
+
+        config = get_config()
+        concurrency = config.mental_model_refresh_concurrency
+
+        # Use semaphore to limit concurrent refreshes
+        semaphore = asyncio.Semaphore(concurrency)
+        # Track results with timing: model_id -> {status, duration_ms, iterations, tool_calls, observations}
+        refresh_results: dict[str, dict[str, Any]] = {}
+
+        async def refresh_with_semaphore(model: dict) -> None:
+            """Refresh a single model with semaphore-controlled concurrency."""
+            async with semaphore:
+                model_id = model["id"]
+                model_name = model["name"]
+                start_time = time.perf_counter()
+                try:
+                    result = await self.refresh_mental_model(
+                        bank_id=bank_id,
+                        model_id=model_id,
+                        request_context=internal_context,
+                        _return_agent_result=True,  # Get agent stats for logging
+                    )
+                    duration_ms = int((time.perf_counter() - start_time) * 1000)
+                    if result and isinstance(result, tuple):
+                        _, agent_result = result
+                        refresh_results[model_id] = {
+                            "status": "success",
+                            "name": model_name,
+                            "duration_ms": duration_ms,
+                            "iterations": agent_result.iterations if agent_result else 0,
+                            "tool_calls": agent_result.tools_called if agent_result else 0,
+                            "observations": len(agent_result.observations) if agent_result else 0,
+                        }
+                    else:
+                        refresh_results[model_id] = {
+                            "status": "success",
+                            "name": model_name,
+                            "duration_ms": duration_ms,
+                        }
+                except Exception as e:
+                    duration_ms = int((time.perf_counter() - start_time) * 1000)
+                    refresh_results[model_id] = {
+                        "status": "failed",
+                        "name": model_name,
+                        "duration_ms": duration_ms,
+                        "error": str(e),
+                    }
+
+        # Run all refreshes in parallel (bounded by semaphore)
+        phase2_start = time.perf_counter()
+        await asyncio.gather(*[refresh_with_semaphore(m) for m in models_to_refresh])
+        phase2_duration_ms = int((time.perf_counter() - phase2_start) * 1000)
+
+        # Build summary for each model
+        model_summaries: list[str] = []
+        for model_id, info in refresh_results.items():
+            if info["status"] == "success":
+                parts = [f"{info['name']}"]
+                if "iterations" in info:
+                    parts.append(f"iter={info['iterations']}")
+                if "tool_calls" in info:
+                    parts.append(f"tools={info['tool_calls']}")
+                if "observations" in info:
+                    parts.append(f"obs={info['observations']}")
+                parts.append(f"{info['duration_ms']}ms")
+                model_summaries.append(f"[{' '.join(parts)}]")
+            else:
+                model_summaries.append(
+                    f"[{info['name']} FAILED: {info.get('error', 'unknown')} {info['duration_ms']}ms]"
+                )
+
+        success_count = sum(1 for r in refresh_results.values() if r["status"] == "success")
+        failed_count = len(refresh_results) - success_count
+
+        # Output single log for Phase 2
+        logger.info(
+            f"[MENTAL_MODELS] Refresh complete for bank={bank_id}, operation={operation_id}: "
+            f"{success_count}/{len(models_to_refresh)} succeeded in {phase2_duration_ms}ms (concurrency={concurrency}). "
+            f"Models: {' '.join(model_summaries)}"
+        )
+
+    async def _handle_generate_mental_model(self, task_dict: dict[str, Any]):
+        """
+        Handler for single mental model generation tasks.
+
+        Generates/refreshes content for a specific mental model.
+
+        Args:
+            task_dict: Dict with 'bank_id', 'model_id', 'operation_id'
+        """
+        bank_id = task_dict.get("bank_id")
+        model_id = task_dict.get("model_id")
+        operation_id = task_dict.get("operation_id")
+
+        if not bank_id or not model_id:
+            raise ValueError("bank_id and model_id are required for generate mental model task")
+
+        logger.info(
+            f"[MENTAL_MODEL_TASK] Starting generation for model_id={model_id}, bank_id={bank_id}, operation_id={operation_id}"
+        )
+
+        from hindsight_api.models import RequestContext
+
+        internal_context = RequestContext()
+
+        # Generate content for the model (reuses the same logic as refresh)
+        result = await self.refresh_mental_model(
+            bank_id=bank_id,
+            model_id=model_id,
+            request_context=internal_context,
+        )
+
+        if result:
+            logger.info(f"[MENTAL_MODEL_TASK] Completed generation for model_id={model_id}, bank_id={bank_id}")
+        else:
+            logger.warning(f"[MENTAL_MODEL_TASK] Model not found: model_id={model_id}, bank_id={bank_id}")
 
     async def execute_task(self, task_dict: dict[str, Any]):
         """
@@ -670,6 +832,8 @@ class MemoryEngine(MemoryEngineInterface):
                 await self._handle_batch_retain(task_dict)
             elif task_type == "refresh_mental_models":
                 await self._handle_refresh_mental_models(task_dict)
+            elif task_type == "generate_mental_model":
+                await self._handle_generate_mental_model(task_dict)
             else:
                 logger.error(f"Unknown task type: {task_type}")
                 # Don't retry unknown task types
@@ -677,9 +841,9 @@ class MemoryEngine(MemoryEngineInterface):
                     await self._delete_operation_record(operation_id)
                 return
 
-            # Task succeeded - delete operation record
+            # Task succeeded - mark operation as completed
             if operation_id:
-                await self._delete_operation_record(operation_id)
+                await self._mark_operation_completed(operation_id)
 
         except Exception as e:
             # Task failed - check if we should retry
@@ -725,7 +889,7 @@ class MemoryEngine(MemoryEngineInterface):
                 await conn.execute(
                     f"""
                     UPDATE {fq_table("async_operations")}
-                    SET status = 'failed', error_message = $2
+                    SET status = 'failed', error_message = $2, updated_at = NOW()
                     WHERE operation_id = $1
                     """,
                     uuid.UUID(operation_id),
@@ -734,6 +898,23 @@ class MemoryEngine(MemoryEngineInterface):
             logger.info(f"Marked async operation as failed: {operation_id}")
         except Exception as e:
             logger.error(f"Failed to mark operation as failed {operation_id}: {e}")
+
+    async def _mark_operation_completed(self, operation_id: str):
+        """Helper to mark an operation as completed in the database."""
+        try:
+            pool = await self._get_pool()
+            async with acquire_with_retry(pool) as conn:
+                await conn.execute(
+                    f"""
+                    UPDATE {fq_table("async_operations")}
+                    SET status = 'completed', updated_at = NOW(), completed_at = NOW()
+                    WHERE operation_id = $1
+                    """,
+                    uuid.UUID(operation_id),
+                )
+            logger.info(f"Marked async operation as completed: {operation_id}")
+        except Exception as e:
+            logger.error(f"Failed to mark operation as completed {operation_id}: {e}")
 
     async def initialize(self):
         """Initialize the connection pool, models, and background workers.
@@ -1447,6 +1628,7 @@ class MemoryEngine(MemoryEngineInterface):
         request_context: "RequestContext",
         tags: list[str] | None = None,
         tags_match: TagsMatch = "any",
+        _connection_budget: int | None = None,
     ) -> RecallResultModel:
         """
         Recall memories using N*4-way parallel retrieval (N fact types × 4 retrieval methods).
@@ -1555,6 +1737,7 @@ class MemoryEngine(MemoryEngineInterface):
                         semaphore_wait=semaphore_wait,
                         tags=tags,
                         tags_match=tags_match,
+                        connection_budget=_connection_budget,
                     )
                     break  # Success - exit retry loop
                 except Exception as e:
@@ -1675,6 +1858,7 @@ class MemoryEngine(MemoryEngineInterface):
         semaphore_wait: float = 0.0,
         tags: list[str] | None = None,
         tags_match: TagsMatch = "any",
+        connection_budget: int | None = None,
     ) -> RecallResultModel:
         """
         Search implementation with modular retrieval and reranking.
@@ -1749,8 +1933,11 @@ class MemoryEngine(MemoryEngineInterface):
 
             # Run optimized retrieval with connection budget
             config = get_config()
+            effective_connection_budget = (
+                connection_budget if connection_budget is not None else config.recall_connection_budget
+            )
             async with budgeted_operation(
-                max_connections=config.recall_connection_budget,
+                max_connections=effective_connection_budget,
                 operation_id=f"recall-{recall_id}",
             ) as op:
                 budgeted_pool = op.wrap_pool(pool)
@@ -2429,10 +2616,12 @@ class MemoryEngine(MemoryEngineInterface):
         pool = await self._get_pool()
         async with acquire_with_retry(pool) as conn:
             async with conn.transaction():
-                # Count units before deletion
-                units_count = await conn.fetchval(
-                    f"SELECT COUNT(*) FROM {fq_table('memory_units')} WHERE document_id = $1", document_id
+                # Get memory unit IDs before deletion (for mental model invalidation)
+                unit_rows = await conn.fetch(
+                    f"SELECT id FROM {fq_table('memory_units')} WHERE document_id = $1", document_id
                 )
+                unit_ids = [str(row["id"]) for row in unit_rows]
+                units_count = len(unit_ids)
 
                 # Delete document (cascades to memory_units and all their links)
                 deleted = await conn.fetchval(
@@ -2440,6 +2629,10 @@ class MemoryEngine(MemoryEngineInterface):
                     document_id,
                     bank_id,
                 )
+
+                # Invalidate deleted fact IDs from mental models
+                if deleted and unit_ids:
+                    await self._invalidate_facts_from_mental_models(conn, bank_id, unit_ids)
 
                 return {"document_deleted": 1 if deleted else 0, "memory_units_deleted": units_count if deleted else 0}
 
@@ -2468,10 +2661,17 @@ class MemoryEngine(MemoryEngineInterface):
         pool = await self._get_pool()
         async with acquire_with_retry(pool) as conn:
             async with conn.transaction():
+                # Get bank_id before deletion (for mental model invalidation)
+                bank_id = await conn.fetchval(f"SELECT bank_id FROM {fq_table('memory_units')} WHERE id = $1", unit_id)
+
                 # Delete the memory unit (cascades to links and associations)
                 deleted = await conn.fetchval(
                     f"DELETE FROM {fq_table('memory_units')} WHERE id = $1 RETURNING id", unit_id
                 )
+
+                # Invalidate deleted fact ID from mental models
+                if deleted and bank_id:
+                    await self._invalidate_facts_from_mental_models(conn, bank_id, [str(deleted)])
 
                 return {
                     "success": deleted is not None,
@@ -3139,7 +3339,7 @@ class MemoryEngine(MemoryEngineInterface):
         request_context: "RequestContext",
     ) -> dict[str, Any]:
         """
-        Get bank profile (name, disposition + background + goal).
+        Get bank profile (name, disposition + mission).
         Auto-creates agent with default values if not exists.
 
         Args:
@@ -3147,7 +3347,7 @@ class MemoryEngine(MemoryEngineInterface):
             request_context: Request context for authentication.
 
         Returns:
-            Dict with name, disposition traits, background, and goal
+            Dict with name, disposition traits, and mission
         """
         await self._authenticate_tenant(request_context)
         pool = await self._get_pool()
@@ -3157,8 +3357,7 @@ class MemoryEngine(MemoryEngineInterface):
             "bank_id": bank_id,
             "name": profile["name"],
             "disposition": disposition,
-            "background": profile["background"],
-            "goal": profile["goal"],
+            "mission": profile["mission"],
         }
 
     async def update_bank_disposition(
@@ -3180,33 +3379,51 @@ class MemoryEngine(MemoryEngineInterface):
         pool = await self._get_pool()
         await bank_utils.update_bank_disposition(pool, bank_id, disposition)
 
-    async def merge_bank_background(
+    async def set_bank_mission(
+        self,
+        bank_id: str,
+        mission: str,
+        *,
+        request_context: "RequestContext",
+    ) -> dict[str, Any]:
+        """
+        Set the mission for a bank.
+
+        Args:
+            bank_id: bank IDentifier
+            mission: The mission text
+            request_context: Request context for authentication.
+
+        Returns:
+            Dict with bank_id and mission.
+        """
+        await self._authenticate_tenant(request_context)
+        pool = await self._get_pool()
+        await bank_utils.set_bank_mission(pool, bank_id, mission)
+        return {"bank_id": bank_id, "mission": mission}
+
+    async def merge_bank_mission(
         self,
         bank_id: str,
         new_info: str,
         *,
-        update_disposition: bool = True,
         request_context: "RequestContext",
     ) -> dict[str, Any]:
         """
-        Merge new background information with existing background using LLM.
+        Merge new mission information with existing mission using LLM.
         Normalizes to first person ("I") and resolves conflicts.
-        Optionally infers disposition traits from the merged background.
 
         Args:
             bank_id: bank IDentifier
-            new_info: New background information to add/merge
-            update_disposition: If True, infer Big Five traits from background (default: True)
+            new_info: New mission information to add/merge
             request_context: Request context for authentication.
 
         Returns:
-            Dict with 'background' (str) and optionally 'disposition' (dict) keys
+            Dict with 'mission' (str) key
         """
         await self._authenticate_tenant(request_context)
         pool = await self._get_pool()
-        return await bank_utils.merge_bank_background(
-            pool, self._reflect_llm_config, bank_id, new_info, update_disposition
-        )
+        return await bank_utils.merge_bank_mission(pool, self._reflect_llm_config, bank_id, new_info)
 
     async def list_banks(
         self,
@@ -3220,7 +3437,7 @@ class MemoryEngine(MemoryEngineInterface):
             request_context: Request context for authentication.
 
         Returns:
-            List of dicts with bank_id, name, disposition, background, created_at, updated_at
+            List of dicts with bank_id, name, disposition, mission, created_at, updated_at
         """
         await self._authenticate_tenant(request_context)
         pool = await self._get_pool()
@@ -3296,50 +3513,67 @@ class MemoryEngine(MemoryEngineInterface):
         # Get bank profile for agent identity
         profile = await self.get_bank_profile(bank_id, request_context=request_context)
 
-        # Pre-fetch mental models list so agent sees them immediately (filtered by tags)
-        mental_models = await self.list_mental_models(
-            bank_id=bank_id, tags=tags, tags_match=tags_match, request_context=request_context
-        )
-        if mental_models:
-            models_list = "\n".join(
-                f"- {m['id']}: {m['name']} ({m['type']}) - {m.get('description', '')}" for m in mental_models
-            )
-            models_context = f"## Available Mental Models\n{models_list}\n\nUse lookup(model_id) to get full details of a matching model."
-            context = f"{models_context}\n\n{context}" if context else models_context
+        # NOTE: Mental models are NOT pre-loaded to keep the initial prompt small.
+        # The agent can call lookup() to list available models if needed.
+        # This is critical for banks with many mental models to avoid huge prompts.
 
-        # Get max iterations from config
+        # Compute max iterations based on budget
         config = get_config()
-        max_iterations = config.reflect_max_iterations
+        base_max_iterations = config.reflect_max_iterations
+        # Budget multipliers: low=0.5x, mid=1x, high=2x
+        budget_multipliers = {Budget.LOW: 0.5, Budget.MID: 1.0, Budget.HIGH: 2.0}
+        effective_budget = budget or Budget.LOW
+        max_iterations = max(1, int(base_max_iterations * budget_multipliers.get(effective_budget, 1.0)))
 
-        # Run agentic loop with database connection
+        # Run agentic loop - acquire connections only when needed for DB operations
+        # (not held during LLM calls which can be slow)
         pool = await self._get_pool()
-        async with pool.acquire() as conn:
-            # Create tool callbacks that capture the connection
-            async def lookup_fn(model_id: str | None = None) -> dict[str, Any]:
+
+        # Create tool callbacks that acquire connections only when needed
+        async def lookup_fn(model_id: str | None = None) -> dict[str, Any]:
+            async with pool.acquire() as conn:
                 return await tool_lookup(conn, bank_id, model_id)
 
-            async def recall_fn(q: str) -> dict[str, Any]:
-                return await tool_recall(self, bank_id, q, request_context, tags=tags, tags_match=tags_match)
-
-            async def learn_fn(input: MentalModelInput) -> dict[str, Any]:
-                return await tool_learn(conn, bank_id, input, tags=tags)
-
-            async def expand_fn(memory_id: str, depth: str) -> dict[str, Any]:
-                return await tool_expand(conn, bank_id, memory_id, depth)
-
-            # Run the agent
-            agent_result = await run_reflect_agent(
-                llm_config=self._reflect_llm_config,
-                bank_id=bank_id,
-                query=query,
-                bank_profile=profile,
-                lookup_fn=lookup_fn,
-                recall_fn=recall_fn,
-                learn_fn=learn_fn,
-                expand_fn=expand_fn,
-                context=context,
-                max_iterations=max_iterations,
+        async def recall_fn(q: str, max_tokens: int = 4096) -> dict[str, Any]:
+            return await tool_recall(
+                self, bank_id, q, request_context, max_tokens=max_tokens, tags=tags, tags_match=tags_match
             )
+
+        async def learn_fn(input: MentalModelInput) -> dict[str, Any]:
+            async with pool.acquire() as conn:
+                result = await tool_learn(conn, bank_id, input, tags=tags)
+            # If a new model was created, trigger background generation
+            if result.get("status") == "created" and result.get("model_id"):
+                try:
+                    await self.generate_mental_model_async(
+                        bank_id=bank_id,
+                        model_id=result["model_id"],
+                        request_context=request_context,
+                    )
+                    logger.info(f"[REFLECT] Triggered background generation for learned model: {result['model_id']}")
+                except Exception as e:
+                    logger.warning(f"[REFLECT] Failed to trigger generation for {result['model_id']}: {e}")
+            return result
+
+        async def expand_fn(memory_ids: list[str], depth: str) -> dict[str, Any]:
+            async with pool.acquire() as conn:
+                return await tool_expand(conn, bank_id, memory_ids, depth)
+
+        # Run the agent
+        agent_result = await run_reflect_agent(
+            llm_config=self._reflect_llm_config,
+            bank_id=bank_id,
+            query=query,
+            bank_profile=profile,
+            lookup_fn=lookup_fn,
+            recall_fn=recall_fn,
+            learn_fn=learn_fn,
+            expand_fn=expand_fn,
+            context=context,
+            max_iterations=max_iterations,
+            max_tokens=max_tokens,
+            response_schema=response_schema,
+        )
 
         total_time = time.time() - reflect_start
         logger.info(
@@ -3347,13 +3581,99 @@ class MemoryEngine(MemoryEngineInterface):
             f"{agent_result.iterations} iterations, {agent_result.tools_called} tool calls | {total_time:.3f}s"
         )
 
+        # Convert agent tool trace to ToolCallTrace objects
+        tool_trace_result = [
+            ToolCallTrace(
+                tool=tc.tool,
+                input=tc.input,
+                output=tc.output,
+                duration_ms=tc.duration_ms,
+            )
+            for tc in agent_result.tool_trace
+        ]
+
+        # Convert agent LLM trace to LLMCallTrace objects
+        llm_trace_result = [LLMCallTrace(scope=lc.scope, duration_ms=lc.duration_ms) for lc in agent_result.llm_trace]
+
+        # Extract memories from recall tool outputs - only include memories the agent actually used
+        # agent_result.used_memory_ids contains validated IDs from the done action
+        used_memory_ids_set = set(agent_result.used_memory_ids) if agent_result.used_memory_ids else set()
+        based_on: dict[str, list[MemoryFact]] = {"world": [], "experience": [], "opinion": []}
+        seen_memory_ids: set[str] = set()
+        for tc in agent_result.tool_trace:
+            if tc.tool == "recall" and "memories" in tc.output:
+                for memory_data in tc.output["memories"]:
+                    memory_id = memory_data.get("id")
+                    # Only include memories that the agent declared as used (or all if none specified)
+                    if memory_id and memory_id not in seen_memory_ids:
+                        if used_memory_ids_set and memory_id not in used_memory_ids_set:
+                            continue  # Skip memories not actually used by the agent
+                        seen_memory_ids.add(memory_id)
+                        fact_type = memory_data.get("type", "world")
+                        if fact_type in based_on:
+                            based_on[fact_type].append(
+                                MemoryFact(
+                                    id=memory_id,
+                                    text=memory_data.get("text", ""),
+                                    fact_type=fact_type,
+                                    context=None,
+                                    occurred_start=memory_data.get("occurred"),
+                                    occurred_end=memory_data.get("occurred"),
+                                )
+                            )
+
+        # Extract mental models from lookup tool outputs - only include models the agent actually used
+        # agent_result.used_model_ids contains validated IDs from the done action
+        used_model_ids_set = set(agent_result.used_model_ids) if agent_result.used_model_ids else set()
+        based_on["mental_model"] = []
+        mental_models_result: list[MentalModelRef] = []
+        seen_model_ids: set[str] = set()
+        for tc in agent_result.tool_trace:
+            if tc.tool == "lookup":
+                # Single model lookup (with full details)
+                if tc.output.get("found") and "model" in tc.output:
+                    model = tc.output["model"]
+                    model_id = model.get("id")
+                    if model_id and model_id not in seen_model_ids:
+                        # Only include models that the agent declared as used (or all if none specified)
+                        if used_model_ids_set and model_id not in used_model_ids_set:
+                            continue  # Skip models not actually used by the agent
+                        seen_model_ids.add(model_id)
+                        # Add to based_on as MemoryFact with type "mental_model"
+                        model_name = model.get("name", "")
+                        model_summary = model.get("summary") or model.get("description", "")
+                        based_on["mental_model"].append(
+                            MemoryFact(
+                                id=model_id,
+                                text=f"{model_name}: {model_summary}",
+                                fact_type="mental_model",
+                                context=f"{model.get('type', 'concept')} ({model.get('subtype', 'structural')})",
+                                occurred_start=None,
+                                occurred_end=None,
+                            )
+                        )
+                        mental_models_result.append(
+                            MentalModelRef(
+                                id=model_id,
+                                name=model_name,
+                                type=model.get("type", "concept"),
+                                subtype=model.get("subtype", "structural"),
+                                description=model.get("description", ""),
+                                summary=model.get("summary"),
+                            )
+                        )
+                # List all models lookup - don't add to based_on (too verbose, just a listing)
+
         # Return response (compatible with existing API)
         result = ReflectResult(
             text=agent_result.text,
-            based_on={"world": [], "experience": [], "opinion": []},  # Agent retrieves dynamically
+            based_on=based_on,
             new_opinions=[],  # Learnings stored as mental models
             structured_output=None,  # Not yet supported for agentic reflect
             usage=None,  # Token tracking not yet implemented for agentic loop
+            tool_trace=tool_trace_result,
+            llm_trace=llm_trace_result,
+            mental_models=mental_models_result,
         )
 
         # Call post-operation hook if validator is configured
@@ -3746,62 +4066,20 @@ class MemoryEngine(MemoryEngineInterface):
     # Mental Models
     # =========================================================================
 
-    async def get_bank_goal(
-        self,
-        bank_id: str,
-        *,
-        request_context: "RequestContext",
-    ) -> str | None:
-        """Get the goal for a bank."""
-        await self._authenticate_tenant(request_context)
-        pool = await self._get_pool()
-
-        async with acquire_with_retry(pool) as conn:
-            row = await conn.fetchrow(
-                f"SELECT goal FROM {fq_table('banks')} WHERE bank_id = $1",
-                bank_id,
-            )
-            return row["goal"] if row else None
-
-    async def set_bank_goal(
-        self,
-        bank_id: str,
-        goal: str,
-        *,
-        request_context: "RequestContext",
-    ) -> dict[str, Any]:
-        """Set the goal for a bank and optionally derive structural models."""
-        await self._authenticate_tenant(request_context)
-        pool = await self._get_pool()
-
-        # Ensure bank exists
-        await bank_utils.get_bank_profile(pool, bank_id)
-
-        async with acquire_with_retry(pool) as conn:
-            await conn.execute(
-                f"UPDATE {fq_table('banks')} SET goal = $1 WHERE bank_id = $2",
-                goal,
-                bank_id,
-            )
-
-        return {"bank_id": bank_id, "goal": goal}
-
     async def list_mental_models(
         self,
         bank_id: str,
         *,
         subtype: str | None = None,
-        model_type: str | None = None,
         tags: list[str] | None = None,
         tags_match: TagsMatch = "any",
         request_context: "RequestContext",
     ) -> list[dict[str, Any]]:
-        """List mental models for a bank, optionally filtered by subtype, type, or tags.
+        """List mental models for a bank, optionally filtered by subtype or tags.
 
         Args:
             bank_id: Bank identifier
-            subtype: Filter by subtype (structural, emergent)
-            model_type: Filter by type (entity, concept, event)
+            subtype: Filter by subtype (structural, emergent, pinned)
             tags: Filter by tags - returns models that match according to tags_match
             tags_match: How to match tags - "any" (OR), "all" (AND), or "exact"
         """
@@ -3809,8 +4087,8 @@ class MemoryEngine(MemoryEngineInterface):
         pool = await self._get_pool()
 
         query = f"""
-            SELECT id, bank_id, type, subtype, name, description, summary,
-                   entity_id, source_facts, triggers, links, tags, last_updated, created_at
+            SELECT id, bank_id, subtype, name, description, observations,
+                   entity_id, links, tags, last_updated, created_at
             FROM {fq_table("mental_models")}
             WHERE bank_id = $1
         """
@@ -3819,10 +4097,6 @@ class MemoryEngine(MemoryEngineInterface):
         if subtype:
             query += f" AND subtype = ${len(params) + 1}"
             params.append(subtype)
-
-        if model_type:
-            query += f" AND type = ${len(params) + 1}"
-            params.append(model_type)
 
         # Tags filtering: include untagged models OR models with matching tags
         if tags:
@@ -3858,8 +4132,8 @@ class MemoryEngine(MemoryEngineInterface):
         async with acquire_with_retry(pool) as conn:
             row = await conn.fetchrow(
                 f"""
-                SELECT id, bank_id, type, subtype, name, description, summary,
-                       entity_id, source_facts, triggers, links, tags, last_updated, created_at
+                SELECT id, bank_id, subtype, name, description, observations,
+                       entity_id, links, tags, last_updated, created_at
                 FROM {fq_table("mental_models")}
                 WHERE bank_id = $1 AND id = $2
                 """,
@@ -3875,8 +4149,19 @@ class MemoryEngine(MemoryEngineInterface):
         model_id: str,
         *,
         request_context: "RequestContext",
-    ) -> dict[str, Any] | None:
-        """Refresh the summary for a mental model using the reflect agent."""
+        _return_agent_result: bool = False,
+    ) -> dict[str, Any] | tuple[dict[str, Any] | None, Any] | None:
+        """Refresh the summary for a mental model using the reflect agent.
+
+        Args:
+            bank_id: Bank identifier
+            model_id: Mental model ID
+            request_context: Request context for authentication
+            _return_agent_result: Internal flag to return (model, agent_result) tuple for logging
+
+        Returns:
+            Updated mental model dict, or (model, agent_result) tuple if _return_agent_result=True
+        """
         await self._authenticate_tenant(request_context)
         pool = await self._get_pool()
 
@@ -3893,22 +4178,22 @@ class MemoryEngine(MemoryEngineInterface):
         profile = await self.get_bank_profile(bank_id, request_context=request_context)
         bank_profile = {
             "name": profile.get("name", "Assistant"),
-            "background": profile.get("background", ""),
-            "goal": profile.get("goal", ""),
+            "mission": profile.get("mission", ""),
         }
 
-        # Build query for the agent - instruct to explore multiple facets
-        query = f"""Generate a comprehensive summary about '{model["name"]}': {model["description"]}
+        # Build query for the agent - instruct to generate multiple structured observations
+        query = f"""Generate comprehensive observations about '{model["name"]}': {model["description"]}
 
-To create a thorough summary:
+To create thorough observations:
 1. Use multiple recall queries to explore different aspects and facets of this topic
 2. Search for related events, relationships, preferences, patterns, and historical context
 3. Use expand to get full context when a fact seems important but incomplete
-4. Synthesize all findings into a coherent, multi-faceted summary
+4. Create multiple distinct observations, each covering a different dimension or aspect
 
-The summary should cover all relevant dimensions discovered through your research."""
+Each observation should be self-contained and focus on a specific theme (e.g., preferences, history, relationships, patterns)."""
 
         # Run the reflect agent with tools (no learn tool for summary generation)
+        # Use observations mode to get structured observations instead of a single text answer
         config = get_config()
         metrics = get_metrics_collector()
         with metrics.record_operation("mental_model_refresh", bank_id=bank_id, source="api"):
@@ -3919,67 +4204,152 @@ The summary should cover all relevant dimensions discovered through your researc
                     query=query,
                     bank_profile=bank_profile,
                     lookup_fn=lambda mid=None: tool_lookup(conn, bank_id, mid),
-                    recall_fn=lambda q: tool_recall(self, bank_id, q, request_context),
-                    expand_fn=lambda mem_id, depth: tool_expand(conn, bank_id, mem_id, depth),
+                    recall_fn=lambda q, mt=4096: tool_recall(self, bank_id, q, request_context, max_tokens=mt),
+                    expand_fn=lambda mem_ids, depth: tool_expand(conn, bank_id, mem_ids, depth),
                     learn_fn=None,  # Disable learn tool for summary generation
                     max_iterations=config.reflect_max_iterations,
+                    output_mode="observations",  # Get structured observations
                 )
 
-        logger.info(
-            f"[MENTAL_MODEL] Refreshed model '{model_id}' summary: "
-            f"{result.iterations} iterations, {result.tools_called} tool calls"
-        )
+        # Update the model with the structured observations from the agent
+        import json
 
-        # Update the model with the new summary
+        # Use observations from the agent result directly, or fall back to single observation from text
+        if result.observations:
+            observations_list = [
+                {"title": obs.title, "text": obs.text, "memory_ids": obs.memory_ids} for obs in result.observations
+            ]
+        else:
+            # Fallback if no structured observations returned
+            observations_list = [{"title": "", "text": result.text, "memory_ids": result.used_memory_ids or []}]
+
+        observations_json = {"observations": observations_list}
         async with acquire_with_retry(pool) as conn:
             updated_row = await conn.fetchrow(
                 f"""
                 UPDATE {fq_table("mental_models")}
-                SET summary = $1, last_updated = NOW()
+                SET observations = $1::jsonb, last_updated = NOW()
                 WHERE bank_id = $2 AND id = $3
-                RETURNING id, bank_id, type, subtype, name, description, summary,
-                          entity_id, source_facts, triggers, links, tags, last_updated, created_at
+                RETURNING id, bank_id, subtype, name, description, observations,
+                          entity_id, links, tags, last_updated, created_at
                 """,
-                result.text,
+                json.dumps(observations_json),
                 bank_id,
                 model_id,
             )
 
-        return self._row_to_mental_model(updated_row) if updated_row else None
+        model_result = self._row_to_mental_model(updated_row) if updated_row else None
+        if _return_agent_result:
+            return (model_result, result)
+        return model_result
 
-    async def refresh_mental_models(
+    async def generate_mental_model_async(
         self,
         bank_id: str,
+        model_id: str,
         *,
-        tags: list[str] | None = None,
         request_context: "RequestContext",
     ) -> dict[str, Any]:
         """
-        Submit a background job to refresh all mental models for a bank.
+        Submit a background job to generate/refresh a specific mental model.
 
-        The background job will:
-        1. Derive structural models from the bank's goal
-        2. Detect emergent candidates (entities worth promoting)
-        3. Filter candidates by goal relevance
-        4. Create/update mental models with specified tags
-        5. Generate summaries for all mental models
+        This is useful for:
+        - Generating content for newly created learned models
+        - Re-generating content for pinned models after description changes
+        - Manual refresh of a specific model without touching others
 
         Args:
             bank_id: Bank identifier
-            tags: Tags to apply to newly created mental models
-
-        Raises:
-            ValueError: If no goal is set for the bank
+            model_id: Mental model ID to generate
 
         Returns:
             Dict with operation_id to track progress
         """
         await self._authenticate_tenant(request_context)
 
-        # Check that goal is set before scheduling the task
-        goal = await self.get_bank_goal(bank_id, request_context=request_context)
-        if not goal:
-            raise ValueError(f"Cannot refresh mental models: no goal is set for bank '{bank_id}'. Set a goal first.")
+        # Verify the model exists
+        model = await self.get_mental_model(bank_id, model_id, request_context=request_context)
+        if not model:
+            raise ValueError(f"Mental model '{model_id}' not found in bank '{bank_id}'")
+
+        pool = await self._get_pool()
+
+        import json
+
+        operation_id = uuid.uuid4()
+
+        # Insert operation record into database
+        async with acquire_with_retry(pool) as conn:
+            await conn.execute(
+                f"""
+                INSERT INTO {fq_table("async_operations")} (operation_id, bank_id, operation_type, result_metadata)
+                VALUES ($1, $2, $3, $4)
+                """,
+                operation_id,
+                bank_id,
+                "generate_mental_model",
+                json.dumps({"model_id": model_id}),
+            )
+
+        # Submit task to background queue
+        task_payload = {
+            "type": "generate_mental_model",
+            "operation_id": str(operation_id),
+            "bank_id": bank_id,
+            "model_id": model_id,
+        }
+
+        await self._task_backend.submit_task(task_payload)
+
+        logger.info(
+            f"[MENTAL_MODEL] Generation task queued for model_id={model_id}, bank_id={bank_id}, operation_id={operation_id}"
+        )
+
+        return {
+            "operation_id": str(operation_id),
+            "model_id": model_id,
+            "status": "queued",
+        }
+
+    async def refresh_mental_models(
+        self,
+        bank_id: str,
+        *,
+        tags: list[str] | None = None,
+        subtype: str | None = None,
+        request_context: "RequestContext",
+    ) -> dict[str, Any]:
+        """
+        Submit a background job to refresh mental models for a bank.
+
+        The background job will (depending on subtype filter):
+        1. Derive structural models from the bank's mission (if subtype is None or "structural")
+        2. Detect emergent candidates (entities worth promoting) (if subtype is None or "emergent")
+        3. Filter candidates by mission relevance
+        4. Create/update mental models with specified tags
+        5. Generate summaries for refreshed mental models
+
+        Args:
+            bank_id: Bank identifier
+            tags: Tags to apply to newly created mental models
+            subtype: Only refresh models of this subtype ("structural" or "emergent").
+                     If None, refreshes all subtypes.
+
+        Raises:
+            ValueError: If no mission is set for the bank
+
+        Returns:
+            Dict with operation_id to track progress
+        """
+        await self._authenticate_tenant(request_context)
+
+        # Check that mission is set before scheduling the task
+        profile = await self.get_bank_profile(bank_id, request_context=request_context)
+        mission = profile.get("mission") or ""
+        if not mission:
+            raise ValueError(
+                f"Cannot refresh mental models: no mission is set for bank '{bank_id}'. Set a mission first."
+            )
 
         pool = await self._get_pool()
 
@@ -4008,6 +4378,8 @@ The summary should cover all relevant dimensions discovered through your researc
         }
         if tags:
             task_payload["tags"] = tags
+        if subtype:
+            task_payload["subtype"] = subtype
 
         await self._task_backend.submit_task(task_payload)
 
@@ -4021,7 +4393,7 @@ The summary should cover all relevant dimensions discovered through your researc
     async def _derive_structural_models_internal(
         self,
         bank_id: str,
-        goal: str,
+        mission: str,
         pool,
         existing_models: list[dict[str, Any]] | None = None,
         tags: list[str] | None = None,
@@ -4031,7 +4403,7 @@ The summary should cover all relevant dimensions discovered through your researc
 
         Args:
             bank_id: Bank identifier
-            goal: The bank's goal
+            mission: The bank's mission
             pool: Database connection pool
             existing_models: Optional list of existing structural models
             tags: Tags to apply to created mental models
@@ -4043,7 +4415,7 @@ The summary should cover all relevant dimensions discovered through your researc
         from .mental_models.structural import derive_structural_models
 
         templates, models_to_remove = await derive_structural_models(
-            self._llm_config, goal, existing_models=existing_models
+            self._llm_config, mission, existing_models=existing_models
         )
 
         model_tags = tags or []
@@ -4054,22 +4426,19 @@ The summary should cover all relevant dimensions discovered through your researc
                     await conn.fetchrow(
                         f"""
                         INSERT INTO {fq_table("mental_models")}
-                        (id, bank_id, type, subtype, name, description, triggers, tags)
-                        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                        (id, bank_id, subtype, name, description, tags)
+                        VALUES ($1, $2, $3, $4, $5, $6)
                         ON CONFLICT (id, bank_id) DO UPDATE SET
                             name = EXCLUDED.name,
                             description = EXCLUDED.description,
-                            triggers = EXCLUDED.triggers,
                             tags = EXCLUDED.tags
                         RETURNING id
                         """,
                         template.id,
                         bank_id,
-                        template.type.value,
                         MentalModelSubtype.STRUCTURAL.value,
                         template.name,
                         template.description,
-                        template.initial_probes or [],
                         model_tags,
                     )
                     created_count += 1
@@ -4090,7 +4459,7 @@ The summary should cover all relevant dimensions discovered through your researc
             pool: Database connection pool
             tags: Tags to apply to the created mental model
         """
-        from .mental_models.models import MentalModelSubtype, MentalModelType
+        from .mental_models.models import MentalModelSubtype
 
         async with acquire_with_retry(pool) as conn:
             # Get entity info
@@ -4108,15 +4477,14 @@ The summary should cover all relevant dimensions discovered through your researc
             row = await conn.fetchrow(
                 f"""
                 INSERT INTO {fq_table("mental_models")}
-                (id, bank_id, type, subtype, name, description, entity_id, tags)
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                (id, bank_id, subtype, name, description, entity_id, tags)
+                VALUES ($1, $2, $3, $4, $5, $6, $7)
                 ON CONFLICT (id, bank_id) DO NOTHING
-                RETURNING id, bank_id, type, subtype, name, description, summary,
-                          entity_id, source_facts, triggers, links, tags, last_updated, created_at
+                RETURNING id, bank_id, subtype, name, description, observations,
+                          entity_id, links, tags, last_updated, created_at
                 """,
                 model_id,
                 bank_id,
-                MentalModelType.ENTITY.value,
                 MentalModelSubtype.EMERGENT.value,
                 entity["canonical_name"],
                 f"Mental model for {entity['canonical_name']}",
@@ -4125,6 +4493,67 @@ The summary should cover all relevant dimensions discovered through your researc
             )
 
         return self._row_to_mental_model(row) if row else None
+
+    async def create_mental_model(
+        self,
+        bank_id: str,
+        name: str,
+        description: str,
+        *,
+        tags: list[str] | None = None,
+        request_context: "RequestContext",
+    ) -> dict[str, Any]:
+        """
+        Create a pinned mental model.
+
+        Pinned mental models are user-defined and persist across refreshes.
+        They are not automatically removed when mental models are regenerated.
+
+        Args:
+            bank_id: Bank identifier
+            name: Human-readable name for the mental model
+            description: One-liner description for quick scanning
+            tags: Tags for scoped visibility
+
+        Returns:
+            The created mental model
+        """
+        await self._authenticate_tenant(request_context)
+        pool = await self._get_pool()
+
+        from .mental_models.models import MentalModelSubtype
+
+        # Generate stable ID from name
+        model_id = f"pinned-{name.lower().replace(' ', '-').replace('/', '-')}"
+
+        async with acquire_with_retry(pool) as conn:
+            # Check if model already exists
+            existing = await conn.fetchrow(
+                f"SELECT id FROM {fq_table('mental_models')} WHERE bank_id = $1 AND id = $2",
+                bank_id,
+                model_id,
+            )
+            if existing:
+                raise ValueError(f"Mental model with name '{name}' already exists")
+
+            row = await conn.fetchrow(
+                f"""
+                INSERT INTO {fq_table("mental_models")}
+                (id, bank_id, subtype, name, description, tags)
+                VALUES ($1, $2, $3, $4, $5, $6)
+                RETURNING id, bank_id, subtype, name, description, observations,
+                          entity_id, links, tags, last_updated, created_at
+                """,
+                model_id,
+                bank_id,
+                MentalModelSubtype.PINNED.value,
+                name,
+                description,
+                tags or [],
+            )
+
+        logger.info(f"[MENTAL_MODELS] Created pinned mental model '{name}' (id={model_id}) for bank {bank_id}")
+        return self._row_to_mental_model(row)
 
     async def delete_mental_model(
         self,
@@ -4220,22 +4649,123 @@ The summary should cover all relevant dimensions discovered through your researc
 
     def _row_to_mental_model(self, row) -> dict[str, Any]:
         """Convert a database row to a mental model dict."""
+        import json
+
+        # Parse observations JSON - can be a dict {"observations": [...]} or a list []
+        observations_data = row.get("observations")
+        if observations_data is None:
+            observations_raw = []
+        elif isinstance(observations_data, str):
+            observations_data = json.loads(observations_data)
+            observations_raw = (
+                observations_data.get("observations", []) if isinstance(observations_data, dict) else observations_data
+            )
+        elif isinstance(observations_data, list):
+            observations_raw = observations_data
+        elif isinstance(observations_data, dict):
+            observations_raw = observations_data.get("observations", [])
+        else:
+            observations_raw = []
+
+        # Normalize observation format: map memory_ids/fact_ids to based_on
+        observations = []
+        for obs in observations_raw:
+            if isinstance(obs, dict):
+                # Get memory IDs from either memory_ids (new) or fact_ids (legacy)
+                based_on = obs.get("memory_ids") or obs.get("fact_ids") or []
+                observations.append(
+                    {
+                        "title": obs.get("title", ""),
+                        "text": obs.get("text", ""),
+                        "based_on": based_on,
+                    }
+                )
+
         return {
             "id": row["id"],
             "bank_id": row["bank_id"],
-            "type": row["type"],
             "subtype": row["subtype"],
             "name": row["name"],
             "description": row["description"],
-            "summary": row["summary"],
+            "observations": observations,
             "entity_id": str(row["entity_id"]) if row["entity_id"] else None,
-            "source_facts": row["source_facts"] or [],
-            "triggers": row["triggers"] or [],
             "links": row["links"] or [],
             "tags": list(row["tags"]) if row.get("tags") else [],
             "last_updated": row["last_updated"].isoformat() if row["last_updated"] else None,
             "created_at": row["created_at"].isoformat(),
         }
+
+    async def _invalidate_facts_from_mental_models(
+        self,
+        conn,
+        bank_id: str,
+        fact_ids: list[str],
+    ) -> int:
+        """
+        Remove fact IDs from mental model observations when memories are deleted.
+
+        Uses JSONB path operations to find and update mental models that reference
+        the deleted fact IDs in their observations.
+
+        Args:
+            conn: Database connection
+            bank_id: Bank identifier
+            fact_ids: List of fact IDs to remove from mental models
+
+        Returns:
+            Number of mental models updated
+        """
+        if not fact_ids:
+            return 0
+
+        # Convert fact_ids to a jsonb array for efficient comparison
+        import json
+
+        fact_ids_json = json.dumps(fact_ids)
+
+        # Update mental models by removing the deleted fact IDs from all observations
+        # This uses jsonb_set to update each observation's fact_ids array
+        result = await conn.execute(
+            f"""
+            UPDATE {fq_table("mental_models")}
+            SET observations = jsonb_set(
+                observations,
+                '{{observations}}',
+                (
+                    SELECT COALESCE(jsonb_agg(
+                        jsonb_set(
+                            observation,
+                            '{{fact_ids}}',
+                            (
+                                SELECT COALESCE(jsonb_agg(fid), '[]'::jsonb)
+                                FROM jsonb_array_elements_text(observation->'fact_ids') AS fid
+                                WHERE NOT (fid::text = ANY($2::text[]))
+                            )
+                        )
+                    ), '[]'::jsonb)
+                    FROM jsonb_array_elements(observations->'observations') AS observation
+                )
+            ),
+            last_updated = NOW()
+            WHERE bank_id = $1
+            AND EXISTS (
+                SELECT 1
+                FROM jsonb_array_elements(observations->'observations') AS observation,
+                     jsonb_array_elements_text(observation->'fact_ids') AS fid
+                WHERE fid::text = ANY($2::text[])
+            )
+            """,
+            bank_id,
+            fact_ids,
+        )
+
+        # Parse the result to get number of updated rows
+        updated_count = int(result.split()[-1]) if result and "UPDATE" in result else 0
+        if updated_count > 0:
+            logger.info(
+                f"[MENTAL_MODELS] Invalidated {len(fact_ids)} fact IDs from {updated_count} mental models in bank {bank_id}"
+            )
+        return updated_count
 
     async def list_operations(
         self,
@@ -4280,6 +4810,61 @@ The summary should cover all relevant dimensions discovered through your researc
                 for row in operations
             ]
 
+    async def get_operation_status(
+        self,
+        bank_id: str,
+        operation_id: str,
+        *,
+        request_context: "RequestContext",
+    ) -> dict[str, Any]:
+        """Get the status of a specific async operation.
+
+        Returns:
+            - status: "pending", "completed", or "failed"
+            - updated_at: last update timestamp
+            - completed_at: completion timestamp (if completed)
+        """
+        await self._authenticate_tenant(request_context)
+        pool = await self._get_pool()
+
+        op_uuid = uuid.UUID(operation_id)
+
+        async with acquire_with_retry(pool) as conn:
+            row = await conn.fetchrow(
+                f"""
+                SELECT operation_id, operation_type, created_at, updated_at, completed_at, status, error_message
+                FROM {fq_table("async_operations")}
+                WHERE operation_id = $1 AND bank_id = $2
+                """,
+                op_uuid,
+                bank_id,
+            )
+
+            if row:
+                # Map DB status to API status (processing -> pending for simplicity)
+                db_status = row["status"]
+                api_status = "pending" if db_status in ("pending", "processing") else db_status
+                return {
+                    "operation_id": operation_id,
+                    "status": api_status,
+                    "operation_type": row["operation_type"],
+                    "created_at": row["created_at"].isoformat() if row["created_at"] else None,
+                    "updated_at": row["updated_at"].isoformat() if row["updated_at"] else None,
+                    "completed_at": row["completed_at"].isoformat() if row["completed_at"] else None,
+                    "error_message": row["error_message"],
+                }
+            else:
+                # Operation not found
+                return {
+                    "operation_id": operation_id,
+                    "status": "not_found",
+                    "operation_type": None,
+                    "created_at": None,
+                    "updated_at": None,
+                    "completed_at": None,
+                    "error_message": None,
+                }
+
     async def cancel_operation(
         self,
         bank_id: str,
@@ -4319,10 +4904,10 @@ The summary should cover all relevant dimensions discovered through your researc
         bank_id: str,
         *,
         name: str | None = None,
-        background: str | None = None,
+        mission: str | None = None,
         request_context: "RequestContext",
     ) -> dict[str, Any]:
-        """Update bank name and/or background."""
+        """Update bank name and/or mission."""
         await self._authenticate_tenant(request_context)
         pool = await self._get_pool()
 
@@ -4338,15 +4923,15 @@ The summary should cover all relevant dimensions discovered through your researc
                     name,
                 )
 
-            if background is not None:
+            if mission is not None:
                 await conn.execute(
                     f"""
                     UPDATE {fq_table("banks")}
-                    SET background = $2, updated_at = NOW()
+                    SET mission = $2, updated_at = NOW()
                     WHERE bank_id = $1
                     """,
                     bank_id,
-                    background,
+                    mission,
                 )
 
         # Return updated profile

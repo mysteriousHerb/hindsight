@@ -10,8 +10,51 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
-# Valid fact types for recall operations (excludes 'observation' which is internal)
-VALID_RECALL_FACT_TYPES = frozenset(["world", "experience", "opinion"])
+# Valid fact types for recall operations (excludes 'observation' which is internal, and 'opinion' which is deprecated)
+VALID_RECALL_FACT_TYPES = frozenset(["world", "experience"])
+
+
+class LLMToolCall(BaseModel):
+    """A tool call requested by the LLM."""
+
+    id: str = Field(description="Unique identifier for this tool call")
+    name: str = Field(description="Name of the tool to call")
+    arguments: dict[str, Any] = Field(description="Arguments to pass to the tool")
+
+
+class LLMToolCallResult(BaseModel):
+    """Result from an LLM call that may include tool calls."""
+
+    content: str | None = Field(default=None, description="Text content if any")
+    tool_calls: list[LLMToolCall] = Field(default_factory=list, description="Tool calls requested by the LLM")
+    finish_reason: str | None = Field(default=None, description="Reason the LLM stopped: 'stop', 'tool_calls', etc.")
+
+
+class ToolCallTrace(BaseModel):
+    """A single tool call made during reflect."""
+
+    tool: str = Field(description="Tool name: lookup, recall, learn, expand")
+    input: dict = Field(description="Tool input parameters")
+    output: dict = Field(description="Tool output/result")
+    duration_ms: int = Field(description="Execution time in milliseconds")
+
+
+class LLMCallTrace(BaseModel):
+    """A single LLM call made during reflect."""
+
+    scope: str = Field(description="Call scope: agent_1, agent_2, final, etc.")
+    duration_ms: int = Field(description="Execution time in milliseconds")
+
+
+class MentalModelRef(BaseModel):
+    """Reference to a mental model accessed during reflect."""
+
+    id: str = Field(description="Mental model ID")
+    name: str = Field(description="Mental model name")
+    type: str = Field(description="Mental model type: entity, concept, event")
+    subtype: str = Field(description="Mental model subtype: structural, emergent, learned")
+    description: str = Field(description="Brief description")
+    summary: str | None = Field(default=None, description="Full summary (when looked up in detail)")
 
 
 class TokenUsage(BaseModel):
@@ -197,6 +240,18 @@ class ReflectResult(BaseModel):
     usage: TokenUsage | None = Field(
         default=None,
         description="Token usage metrics for the LLM calls made during this reflect operation.",
+    )
+    tool_trace: list[ToolCallTrace] = Field(
+        default_factory=list,
+        description="Trace of tool calls made during reflection. Only present when include.tool_calls is enabled.",
+    )
+    llm_trace: list[LLMCallTrace] = Field(
+        default_factory=list,
+        description="Trace of LLM calls made during reflection. Only present when include.tool_calls is enabled.",
+    )
+    mental_models: list[MentalModelRef] = Field(
+        default_factory=list,
+        description="Mental models accessed during reflection. Only present when include.facts is enabled.",
     )
 
 

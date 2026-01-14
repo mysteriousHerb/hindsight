@@ -8,7 +8,7 @@ Emergent models are discovered from data patterns:
 - Behavioral anchors ("After X, we started Y")
 - Reference frequency (anything mentioned repeatedly)
 
-When a pattern is detected, it goes through a goal filter to check relevance,
+When a pattern is detected, it goes through a mission filter to check relevance,
 and if relevant, is promoted to a mental model.
 """
 
@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, Field
 
-from .models import EmergentCandidate, MentalModelType
+from .models import EmergentCandidate
 
 if TYPE_CHECKING:
     from ..llm_wrapper import LLMConfig
@@ -25,32 +25,29 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-class GoalFilterCandidate(BaseModel):
-    """Result of goal filtering for a single candidate."""
+class MissionFilterCandidate(BaseModel):
+    """Result of mission filtering for a single candidate."""
 
     name: str
     promote: bool = Field(description="True if this is a specific named entity worth tracking")
     reason: str = Field(description="Brief explanation for the decision")
 
 
-class GoalFilterResponse(BaseModel):
-    """Response from LLM for goal filtering."""
+class MissionFilterResponse(BaseModel):
+    """Response from LLM for mission filtering."""
 
-    candidates: list[GoalFilterCandidate] = Field(description="Filtering decision for each candidate")
+    candidates: list[MissionFilterCandidate] = Field(description="Filtering decision for each candidate")
 
 
-def build_goal_filter_prompt(goal: str, candidates: list[EmergentCandidate]) -> str:
-    """Build the prompt for filtering candidates by goal relevance."""
+def build_mission_filter_prompt(mission: str, candidates: list[EmergentCandidate]) -> str:
+    """Build the prompt for filtering candidates by mission relevance."""
     candidate_list = "\n".join(
-        [
-            f"- {c.name} (type: {c.type.value}, mentions: {c.mention_count}, method: {c.detection_method})"
-            for c in candidates
-        ]
+        [f"- {c.name} (mentions: {c.mention_count}, method: {c.detection_method})" for c in candidates]
     )
 
     return f"""Filter these detected entities. For each one, decide: promote=true or promote=false.
 
-GOAL: {goal}
+MISSION: {mission}
 
 DETECTED ENTITIES:
 {candidate_list}
@@ -78,8 +75,8 @@ THE TEST: Is this a specific name you'd find in a contact list or org chart?
 When in doubt, set promote=false."""
 
 
-def get_goal_filter_system_message() -> str:
-    """System message for goal filtering."""
+def get_mission_filter_system_message() -> str:
+    """System message for mission filtering."""
     return """You filter entities for promotion. Output JSON with 'candidates' array.
 
 Rules:
@@ -96,9 +93,9 @@ Examples:
 When in doubt, promote=false. Most entities should be rejected."""
 
 
-async def filter_candidates_by_goal(
+async def filter_candidates_by_mission(
     llm_config: "LLMConfig",
-    goal: str,
+    mission: str,
     candidates: list[EmergentCandidate],
 ) -> list[EmergentCandidate]:
     """
@@ -106,7 +103,7 @@ async def filter_candidates_by_goal(
 
     Args:
         llm_config: LLM configuration
-        goal: The bank's goal (used for context)
+        mission: The bank's mission (used for context)
         candidates: List of detected candidates
 
     Returns:
@@ -115,21 +112,21 @@ async def filter_candidates_by_goal(
     if not candidates:
         return []
 
-    if not goal:
-        # No goal = no filtering, keep all candidates
-        logger.debug("[EMERGENT] No goal set, skipping filter")
+    if not mission:
+        # No mission = no filtering, keep all candidates
+        logger.debug("[EMERGENT] No mission set, skipping filter")
         return candidates
 
-    prompt = build_goal_filter_prompt(goal, candidates)
+    prompt = build_mission_filter_prompt(mission, candidates)
 
     try:
         result = await llm_config.call(
             messages=[
-                {"role": "system", "content": get_goal_filter_system_message()},
+                {"role": "system", "content": get_mission_filter_system_message()},
                 {"role": "user", "content": prompt},
             ],
-            response_format=GoalFilterResponse,
-            scope="mental_model_goal_filter",
+            response_format=MissionFilterResponse,
+            scope="mental_model_mission_filter",
         )
 
         # Build name -> promote map
@@ -148,11 +145,11 @@ async def filter_candidates_by_goal(
                 # Candidate not in response - reject by default
                 logger.debug(f"[EMERGENT] '{candidate.name}' not in response, rejecting")
 
-        logger.info(f"[EMERGENT] Goal filter: {len(filtered)}/{len(candidates)} candidates promoted")
+        logger.info(f"[EMERGENT] Mission filter: {len(filtered)}/{len(candidates)} candidates promoted")
         return filtered
 
     except Exception as e:
-        logger.warning(f"[EMERGENT] Goal filter failed, rejecting all candidates: {e}")
+        logger.warning(f"[EMERGENT] Mission filter failed, rejecting all candidates: {e}")
         return []
 
 
@@ -180,7 +177,6 @@ async def evaluate_emergent_models(
     candidates = [
         EmergentCandidate(
             name=m["name"],
-            type=MentalModelType.ENTITY,
             detection_method="existing_emergent_model",
             mention_count=0,
         )
@@ -217,10 +213,10 @@ When in doubt, set promote=false."""
     try:
         result = await llm_config.call(
             messages=[
-                {"role": "system", "content": get_goal_filter_system_message()},
+                {"role": "system", "content": get_mission_filter_system_message()},
                 {"role": "user", "content": prompt},
             ],
-            response_format=GoalFilterResponse,
+            response_format=MissionFilterResponse,
             scope="mental_model_emergent_evaluation",
         )
 
@@ -233,7 +229,6 @@ When in doubt, set promote=false."""
             name = model["name"]
             if name in promote_map:
                 if not promote_map[name]:
-                    logger.info(f"[EMERGENT] Marking '{name}' for removal (not a specific named entity)")
                     models_to_remove.append(model["id"])
                 else:
                     logger.debug(f"[EMERGENT] Keeping '{name}'")
@@ -305,7 +300,6 @@ async def detect_entity_candidates(
             candidates.append(
                 EmergentCandidate(
                     name=row["canonical_name"],
-                    type=MentalModelType.ENTITY,
                     detection_method="named_entity_extraction",
                     mention_count=row["mention_count"],
                     entity_id=str(row["id"]),

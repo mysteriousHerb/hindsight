@@ -20,6 +20,9 @@ import json
 from pydantic import BaseModel, ConfigDict, StrictStr
 from typing import Any, ClassVar, Dict, List, Optional
 from hindsight_client_api.models.reflect_fact import ReflectFact
+from hindsight_client_api.models.reflect_llm_call import ReflectLLMCall
+from hindsight_client_api.models.reflect_mental_model import ReflectMentalModel
+from hindsight_client_api.models.reflect_tool_call import ReflectToolCall
 from hindsight_client_api.models.token_usage import TokenUsage
 from typing import Optional, Set
 from typing_extensions import Self
@@ -32,7 +35,10 @@ class ReflectResponse(BaseModel):
     based_on: Optional[List[ReflectFact]] = None
     structured_output: Optional[Dict[str, Any]] = None
     usage: Optional[TokenUsage] = None
-    __properties: ClassVar[List[str]] = ["text", "based_on", "structured_output", "usage"]
+    tool_calls: Optional[List[ReflectToolCall]] = None
+    llm_calls: Optional[List[ReflectLLMCall]] = None
+    mental_models: Optional[List[ReflectMentalModel]] = None
+    __properties: ClassVar[List[str]] = ["text", "based_on", "structured_output", "usage", "tool_calls", "llm_calls", "mental_models"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -83,6 +89,27 @@ class ReflectResponse(BaseModel):
         # override the default output from pydantic by calling `to_dict()` of usage
         if self.usage:
             _dict['usage'] = self.usage.to_dict()
+        # override the default output from pydantic by calling `to_dict()` of each item in tool_calls (list)
+        _items = []
+        if self.tool_calls:
+            for _item_tool_calls in self.tool_calls:
+                if _item_tool_calls:
+                    _items.append(_item_tool_calls.to_dict())
+            _dict['tool_calls'] = _items
+        # override the default output from pydantic by calling `to_dict()` of each item in llm_calls (list)
+        _items = []
+        if self.llm_calls:
+            for _item_llm_calls in self.llm_calls:
+                if _item_llm_calls:
+                    _items.append(_item_llm_calls.to_dict())
+            _dict['llm_calls'] = _items
+        # override the default output from pydantic by calling `to_dict()` of each item in mental_models (list)
+        _items = []
+        if self.mental_models:
+            for _item_mental_models in self.mental_models:
+                if _item_mental_models:
+                    _items.append(_item_mental_models.to_dict())
+            _dict['mental_models'] = _items
         # set to None if structured_output (nullable) is None
         # and model_fields_set contains the field
         if self.structured_output is None and "structured_output" in self.model_fields_set:
@@ -92,6 +119,21 @@ class ReflectResponse(BaseModel):
         # and model_fields_set contains the field
         if self.usage is None and "usage" in self.model_fields_set:
             _dict['usage'] = None
+
+        # set to None if tool_calls (nullable) is None
+        # and model_fields_set contains the field
+        if self.tool_calls is None and "tool_calls" in self.model_fields_set:
+            _dict['tool_calls'] = None
+
+        # set to None if llm_calls (nullable) is None
+        # and model_fields_set contains the field
+        if self.llm_calls is None and "llm_calls" in self.model_fields_set:
+            _dict['llm_calls'] = None
+
+        # set to None if mental_models (nullable) is None
+        # and model_fields_set contains the field
+        if self.mental_models is None and "mental_models" in self.model_fields_set:
+            _dict['mental_models'] = None
 
         return _dict
 
@@ -108,7 +150,10 @@ class ReflectResponse(BaseModel):
             "text": obj.get("text"),
             "based_on": [ReflectFact.from_dict(_item) for _item in obj["based_on"]] if obj.get("based_on") is not None else None,
             "structured_output": obj.get("structured_output"),
-            "usage": TokenUsage.from_dict(obj["usage"]) if obj.get("usage") is not None else None
+            "usage": TokenUsage.from_dict(obj["usage"]) if obj.get("usage") is not None else None,
+            "tool_calls": [ReflectToolCall.from_dict(_item) for _item in obj["tool_calls"]] if obj.get("tool_calls") is not None else None,
+            "llm_calls": [ReflectLLMCall.from_dict(_item) for _item in obj["llm_calls"]] if obj.get("llm_calls") is not None else None,
+            "mental_models": [ReflectMentalModel.from_dict(_item) for _item in obj["mental_models"]] if obj.get("mental_models") is not None else None
         })
         return _obj
 

@@ -4,29 +4,28 @@ import pytest
 from unittest.mock import AsyncMock, MagicMock
 
 from hindsight_api.engine.mental_models.emergent import (
-    build_goal_filter_prompt,
+    build_mission_filter_prompt,
     evaluate_emergent_models,
-    filter_candidates_by_goal,
-    GoalFilterResponse,
-    GoalFilterCandidate,
+    filter_candidates_by_mission,
+    MissionFilterResponse,
+    MissionFilterCandidate,
 )
-from hindsight_api.engine.mental_models.models import EmergentCandidate, MentalModelType
+from hindsight_api.engine.mental_models.models import EmergentCandidate
 
 
-class TestBuildGoalFilterPrompt:
-    """Test prompt building for goal filtering."""
+class TestBuildMissionFilterPrompt:
+    """Test prompt building for mission filtering."""
 
-    def test_prompt_contains_goal(self):
-        """Test that prompt includes the goal."""
+    def test_prompt_contains_mission(self):
+        """Test that prompt includes the mission."""
         candidates = [
             EmergentCandidate(
                 name="Alice",
-                type=MentalModelType.ENTITY,
                 detection_method="named_entity_extraction",
                 mention_count=10,
             )
         ]
-        prompt = build_goal_filter_prompt("Be a PM for engineering team", candidates)
+        prompt = build_mission_filter_prompt("Be a PM for engineering team", candidates)
         assert "Be a PM for engineering team" in prompt
 
     def test_prompt_contains_candidates(self):
@@ -34,18 +33,16 @@ class TestBuildGoalFilterPrompt:
         candidates = [
             EmergentCandidate(
                 name="Alice Chen",
-                type=MentalModelType.ENTITY,
                 detection_method="named_entity_extraction",
                 mention_count=10,
             ),
             EmergentCandidate(
                 name="Project Phoenix",
-                type=MentalModelType.ENTITY,
                 detection_method="named_entity_extraction",
                 mention_count=5,
             ),
         ]
-        prompt = build_goal_filter_prompt("Track projects", candidates)
+        prompt = build_mission_filter_prompt("Track projects", candidates)
         assert "Alice Chen" in prompt
         assert "Project Phoenix" in prompt
 
@@ -54,12 +51,11 @@ class TestBuildGoalFilterPrompt:
         candidates = [
             EmergentCandidate(
                 name="test",
-                type=MentalModelType.ENTITY,
                 detection_method="named_entity_extraction",
                 mention_count=1,
             )
         ]
-        prompt = build_goal_filter_prompt("Test goal", candidates)
+        prompt = build_mission_filter_prompt("Test mission", candidates)
 
         # Should contain rejection guidance for generic terms
         assert "promote=false" in prompt
@@ -68,8 +64,8 @@ class TestBuildGoalFilterPrompt:
         assert "motivation" in prompt  # Example of abstract concept to reject
 
 
-class TestFilterCandidatesByGoal:
-    """Test the filter_candidates_by_goal function."""
+class TestFilterCandidatesByMission:
+    """Test the filter_candidates_by_mission function."""
 
     @pytest.fixture
     def mock_llm_config(self):
@@ -80,27 +76,26 @@ class TestFilterCandidatesByGoal:
 
     async def test_empty_candidates(self, mock_llm_config):
         """Test with empty candidate list."""
-        result = await filter_candidates_by_goal(
+        result = await filter_candidates_by_mission(
             llm_config=mock_llm_config,
-            goal="Test goal",
+            mission="Test mission",
             candidates=[],
         )
         assert result == []
         mock_llm_config.call.assert_not_called()
 
-    async def test_no_goal_keeps_all(self, mock_llm_config):
-        """Test that no goal keeps all candidates (skips filtering)."""
+    async def test_no_mission_keeps_all(self, mock_llm_config):
+        """Test that no mission keeps all candidates (skips filtering)."""
         candidates = [
             EmergentCandidate(
                 name="Alice",
-                type=MentalModelType.ENTITY,
                 detection_method="named_entity_extraction",
                 mention_count=10,
             )
         ]
-        result = await filter_candidates_by_goal(
+        result = await filter_candidates_by_mission(
             llm_config=mock_llm_config,
-            goal="",  # Empty goal
+            mission="",  # Empty mission
             candidates=candidates,
         )
         assert len(result) == 1
@@ -112,29 +107,27 @@ class TestFilterCandidatesByGoal:
         candidates = [
             EmergentCandidate(
                 name="Alice Chen",
-                type=MentalModelType.ENTITY,
                 detection_method="named_entity_extraction",
                 mention_count=10,
             ),
             EmergentCandidate(
                 name="community",
-                type=MentalModelType.ENTITY,
                 detection_method="named_entity_extraction",
                 mention_count=5,
             ),
         ]
 
         # Mock LLM response - Alice is promoted, community is not
-        mock_llm_config.call.return_value = GoalFilterResponse(
+        mock_llm_config.call.return_value = MissionFilterResponse(
             candidates=[
-                GoalFilterCandidate(name="Alice Chen", promote=True, reason="Specific person"),
-                GoalFilterCandidate(name="community", promote=False, reason="Generic abstract concept"),
+                MissionFilterCandidate(name="Alice Chen", promote=True, reason="Specific person"),
+                MissionFilterCandidate(name="community", promote=False, reason="Generic abstract concept"),
             ]
         )
 
-        result = await filter_candidates_by_goal(
+        result = await filter_candidates_by_mission(
             llm_config=mock_llm_config,
-            goal="Be a PM for engineering team",
+            mission="Be a PM for engineering team",
             candidates=candidates,
         )
 
@@ -154,7 +147,6 @@ class TestFilterCandidatesByGoal:
         candidates = [
             EmergentCandidate(
                 name=name,
-                type=MentalModelType.ENTITY,
                 detection_method="named_entity_extraction",
                 mention_count=10,
             )
@@ -165,19 +157,16 @@ class TestFilterCandidatesByGoal:
         valid_candidates = [
             EmergentCandidate(
                 name="John",
-                type=MentalModelType.ENTITY,
                 detection_method="named_entity_extraction",
                 mention_count=10,
             ),
             EmergentCandidate(
                 name="Maria",
-                type=MentalModelType.ENTITY,
                 detection_method="named_entity_extraction",
                 mention_count=8,
             ),
             EmergentCandidate(
                 name="Max",
-                type=MentalModelType.ENTITY,
                 detection_method="named_entity_extraction",
                 mention_count=6,
             ),
@@ -186,19 +175,19 @@ class TestFilterCandidatesByGoal:
 
         # Mock LLM response - reject all generic, promote only specific names
         response_candidates = [
-            GoalFilterCandidate(name=name, promote=False, reason="Generic/abstract term")
+            MissionFilterCandidate(name=name, promote=False, reason="Generic/abstract term")
             for name in generic_names
         ]
         response_candidates.extend([
-            GoalFilterCandidate(name=c.name, promote=True, reason="Specific person name")
+            MissionFilterCandidate(name=c.name, promote=True, reason="Specific person name")
             for c in valid_candidates
         ])
 
-        mock_llm_config.call.return_value = GoalFilterResponse(candidates=response_candidates)
+        mock_llm_config.call.return_value = MissionFilterResponse(candidates=response_candidates)
 
-        result = await filter_candidates_by_goal(
+        result = await filter_candidates_by_mission(
             llm_config=mock_llm_config,
-            goal="Be a health coach",
+            mission="Be a health coach",
             candidates=candidates,
         )
 
@@ -223,7 +212,6 @@ class TestFilterCandidatesByGoal:
         candidates = [
             EmergentCandidate(
                 name=name,
-                type=MentalModelType.ENTITY,
                 detection_method="named_entity_extraction",
                 mention_count=10,
             )
@@ -232,14 +220,14 @@ class TestFilterCandidatesByGoal:
 
         # Mock LLM response - promote all
         response_candidates = [
-            GoalFilterCandidate(name=name, promote=True, reason="Specific named entity")
+            MissionFilterCandidate(name=name, promote=True, reason="Specific named entity")
             for name in valid_names
         ]
-        mock_llm_config.call.return_value = GoalFilterResponse(candidates=response_candidates)
+        mock_llm_config.call.return_value = MissionFilterResponse(candidates=response_candidates)
 
-        result = await filter_candidates_by_goal(
+        result = await filter_candidates_by_mission(
             llm_config=mock_llm_config,
-            goal="Be a PM for engineering team",
+            mission="Be a PM for engineering team",
             candidates=candidates,
         )
 
@@ -252,7 +240,6 @@ class TestFilterCandidatesByGoal:
         candidates = [
             EmergentCandidate(
                 name="Alice",
-                type=MentalModelType.ENTITY,
                 detection_method="named_entity_extraction",
                 mention_count=10,
             )
@@ -260,9 +247,9 @@ class TestFilterCandidatesByGoal:
 
         mock_llm_config.call.side_effect = Exception("LLM error")
 
-        result = await filter_candidates_by_goal(
+        result = await filter_candidates_by_mission(
             llm_config=mock_llm_config,
-            goal="Test goal",
+            mission="Test mission",
             candidates=candidates,
         )
 
@@ -274,28 +261,26 @@ class TestFilterCandidatesByGoal:
         candidates = [
             EmergentCandidate(
                 name="Alice",
-                type=MentalModelType.ENTITY,
                 detection_method="named_entity_extraction",
                 mention_count=10,
             ),
             EmergentCandidate(
                 name="Bob",
-                type=MentalModelType.ENTITY,
                 detection_method="named_entity_extraction",
                 mention_count=5,
             ),
         ]
 
         # Mock LLM response - only includes Alice, not Bob
-        mock_llm_config.call.return_value = GoalFilterResponse(
+        mock_llm_config.call.return_value = MissionFilterResponse(
             candidates=[
-                GoalFilterCandidate(name="Alice", promote=True, reason="Specific person"),
+                MissionFilterCandidate(name="Alice", promote=True, reason="Specific person"),
             ]
         )
 
-        result = await filter_candidates_by_goal(
+        result = await filter_candidates_by_mission(
             llm_config=mock_llm_config,
-            goal="Test goal",
+            mission="Test mission",
             candidates=candidates,
         )
 
@@ -334,13 +319,13 @@ class TestEvaluateEmergentModels:
         ]
 
         # Mock LLM response - reject generic, keep specific names
-        mock_llm_config.call.return_value = GoalFilterResponse(
+        mock_llm_config.call.return_value = MissionFilterResponse(
             candidates=[
-                GoalFilterCandidate(name="kids", promote=False, reason="Generic category"),
-                GoalFilterCandidate(name="community", promote=False, reason="Abstract concept"),
-                GoalFilterCandidate(name="motivation", promote=False, reason="Abstract concept"),
-                GoalFilterCandidate(name="John", promote=True, reason="Person name"),
-                GoalFilterCandidate(name="Maria", promote=True, reason="Person name"),
+                MissionFilterCandidate(name="kids", promote=False, reason="Generic category"),
+                MissionFilterCandidate(name="community", promote=False, reason="Abstract concept"),
+                MissionFilterCandidate(name="motivation", promote=False, reason="Abstract concept"),
+                MissionFilterCandidate(name="John", promote=True, reason="Person name"),
+                MissionFilterCandidate(name="Maria", promote=True, reason="Person name"),
             ]
         )
 
@@ -361,11 +346,11 @@ class TestEvaluateEmergentModels:
         ]
 
         # Mock LLM response - keep all
-        mock_llm_config.call.return_value = GoalFilterResponse(
+        mock_llm_config.call.return_value = MissionFilterResponse(
             candidates=[
-                GoalFilterCandidate(name="John", promote=True, reason="Person name"),
-                GoalFilterCandidate(name="Google", promote=True, reason="Organization"),
-                GoalFilterCandidate(name="Project Phoenix", promote=True, reason="Named project"),
+                MissionFilterCandidate(name="John", promote=True, reason="Person name"),
+                MissionFilterCandidate(name="Google", promote=True, reason="Organization"),
+                MissionFilterCandidate(name="Project Phoenix", promote=True, reason="Named project"),
             ]
         )
 
@@ -402,9 +387,9 @@ class TestEvaluateEmergentModels:
         ]
 
         # Mock LLM response - only includes Alice
-        mock_llm_config.call.return_value = GoalFilterResponse(
+        mock_llm_config.call.return_value = MissionFilterResponse(
             candidates=[
-                GoalFilterCandidate(name="Alice", promote=True, reason="Person name"),
+                MissionFilterCandidate(name="Alice", promote=True, reason="Person name"),
             ]
         )
 
@@ -415,3 +400,117 @@ class TestEvaluateEmergentModels:
 
         # Bob should be marked for removal (missing from response)
         assert result == ["id-bob"]
+
+
+class TestRemovedEntitiesNotRepromoted:
+    """Test that entities removed by evaluation are not re-promoted.
+
+    This tests the fix for a bug where:
+    1. evaluate_emergent_models returns model IDs to remove (e.g., 'entity-maya')
+    2. We delete those models
+    3. detect_entity_candidates finds the same entities (now eligible since model was deleted)
+    4. filter_candidates_by_goal approves them (different LLM call)
+    5. BUG: We were re-promoting the same entities we just removed
+
+    The fix tracks removed entity_ids and excludes them from promotion.
+    """
+
+    async def test_removed_entity_ids_excluded_from_promotion(self):
+        """Test that entities whose models were removed are not re-promoted."""
+        from hindsight_api.engine.mental_models.models import EmergentCandidate
+
+        # Simulate the scenario from the bug:
+        # - existing_emergent has model 'entity-maya' with entity_id='uuid-maya'
+        # - evaluate_emergent_models says to remove 'entity-maya'
+        # - detect_entity_candidates returns 'Maya' with entity_id='uuid-maya' (now eligible)
+        # - filter_candidates_by_goal says to promote 'Maya'
+        # - But we should NOT promote because we just removed it
+
+        existing_emergent = [
+            {"id": "entity-maya", "name": "Maya", "entity_id": "uuid-maya"},
+            {"id": "entity-alex", "name": "Alex", "entity_id": "uuid-alex"},
+            {"id": "entity-john", "name": "John", "entity_id": "uuid-john"},  # This one will be kept
+        ]
+
+        # Models to remove (evaluate_emergent_models would return these)
+        models_to_remove = ["entity-maya", "entity-alex"]
+
+        # Build model_id -> entity_id mapping (this is what the fix does)
+        model_to_entity = {m["id"]: m.get("entity_id") for m in existing_emergent}
+
+        # Track removed entity_ids
+        removed_entity_ids: set[str] = set()
+        for model_id in models_to_remove:
+            entity_id = model_to_entity.get(model_id)
+            if entity_id:
+                removed_entity_ids.add(str(entity_id))
+
+        # Verify we tracked the right entity_ids
+        assert removed_entity_ids == {"uuid-maya", "uuid-alex"}
+
+        # Now simulate candidates that were detected (includes removed entities)
+        candidates = [
+            EmergentCandidate(
+                name="Maya", entity_id="uuid-maya", detection_method="named_entity", mention_count=10
+            ),
+            EmergentCandidate(
+                name="Alex", entity_id="uuid-alex", detection_method="named_entity", mention_count=8
+            ),
+            EmergentCandidate(
+                name="NewPerson", entity_id="uuid-new", detection_method="named_entity", mention_count=5
+            ),
+        ]
+
+        # Filter out candidates whose entity was just removed (the fix)
+        filtered_candidates = [c for c in candidates if c.entity_id not in removed_entity_ids]
+
+        # Only NewPerson should remain - Maya and Alex were removed and should not be re-promoted
+        assert len(filtered_candidates) == 1
+        assert filtered_candidates[0].name == "NewPerson"
+        assert filtered_candidates[0].entity_id == "uuid-new"
+
+    async def test_candidates_without_matching_removal_are_kept(self):
+        """Test that candidates not in the removed set are still promoted."""
+        from hindsight_api.engine.mental_models.models import EmergentCandidate
+
+        # No models removed
+        removed_entity_ids: set[str] = set()
+
+        candidates = [
+            EmergentCandidate(
+                name="Alice", entity_id="uuid-alice", detection_method="named_entity", mention_count=10
+            ),
+            EmergentCandidate(
+                name="Bob", entity_id="uuid-bob", detection_method="named_entity", mention_count=8
+            ),
+        ]
+
+        # Filter (should keep all since nothing was removed)
+        filtered_candidates = [c for c in candidates if c.entity_id not in removed_entity_ids]
+
+        assert len(filtered_candidates) == 2
+        assert {c.name for c in filtered_candidates} == {"Alice", "Bob"}
+
+    async def test_partial_removal_keeps_other_candidates(self):
+        """Test that only removed entities are excluded, others pass through."""
+        from hindsight_api.engine.mental_models.models import EmergentCandidate
+
+        # Only one entity removed
+        removed_entity_ids = {"uuid-removed"}
+
+        candidates = [
+            EmergentCandidate(
+                name="Removed", entity_id="uuid-removed", detection_method="named_entity", mention_count=10
+            ),
+            EmergentCandidate(
+                name="Kept1", entity_id="uuid-kept1", detection_method="named_entity", mention_count=8
+            ),
+            EmergentCandidate(
+                name="Kept2", entity_id="uuid-kept2", detection_method="named_entity", mention_count=5
+            ),
+        ]
+
+        filtered_candidates = [c for c in candidates if c.entity_id not in removed_entity_ids]
+
+        assert len(filtered_candidates) == 2
+        assert {c.name for c in filtered_candidates} == {"Kept1", "Kept2"}

@@ -12,6 +12,9 @@ import type {
   ClearBankMemoriesData,
   ClearBankMemoriesErrors,
   ClearBankMemoriesResponses,
+  CreateMentalModelData,
+  CreateMentalModelErrors,
+  CreateMentalModelResponses,
   CreateOrUpdateBankData,
   CreateOrUpdateBankErrors,
   CreateOrUpdateBankResponses,
@@ -24,6 +27,9 @@ import type {
   DeleteMentalModelData,
   DeleteMentalModelErrors,
   DeleteMentalModelResponses,
+  GenerateMentalModelData,
+  GenerateMentalModelErrors,
+  GenerateMentalModelResponses,
   GetAgentStatsData,
   GetAgentStatsErrors,
   GetAgentStatsResponses,
@@ -48,6 +54,9 @@ import type {
   GetMentalModelData,
   GetMentalModelErrors,
   GetMentalModelResponses,
+  GetOperationStatusData,
+  GetOperationStatusErrors,
+  GetOperationStatusResponses,
   HealthEndpointHealthGetData,
   HealthEndpointHealthGetResponses,
   ListBanksData,
@@ -91,9 +100,9 @@ import type {
   RetainMemoriesData,
   RetainMemoriesErrors,
   RetainMemoriesResponses,
-  SetBankGoalData,
-  SetBankGoalErrors,
-  SetBankGoalResponses,
+  SetBankMissionData,
+  SetBankMissionErrors,
+  SetBankMissionResponses,
   UpdateBankDispositionData,
   UpdateBankDispositionErrors,
   UpdateBankDispositionResponses,
@@ -300,9 +309,11 @@ export const getEntity = <ThrowOnError extends boolean = false>(
   >({ url: "/v1/default/banks/{bank_id}/entities/{entity_id}", ...options });
 
 /**
- * Regenerate entity observations
+ * Regenerate entity observations (deprecated)
  *
- * Regenerate observations for an entity based on all facts mentioning it.
+ * This endpoint is deprecated. Entity observations have been replaced by mental models.
+ *
+ * @deprecated
  */
 export const regenerateEntityObservations = <
   ThrowOnError extends boolean = false,
@@ -319,30 +330,9 @@ export const regenerateEntityObservations = <
   });
 
 /**
- * Set bank goal
- *
- * Set the goal for a bank. The goal is used to derive structural mental models.
- */
-export const setBankGoal = <ThrowOnError extends boolean = false>(
-  options: Options<SetBankGoalData, ThrowOnError>,
-) =>
-  (options.client ?? client).put<
-    SetBankGoalResponses,
-    SetBankGoalErrors,
-    ThrowOnError
-  >({
-    url: "/v1/default/banks/{bank_id}/goal",
-    ...options,
-    headers: {
-      "Content-Type": "application/json",
-      ...options.headers,
-    },
-  });
-
-/**
  * List mental models
  *
- * List all mental models for a bank, optionally filtered by subtype or type.
+ * List all mental models for a bank, optionally filtered by subtype or tags.
  */
 export const listMentalModels = <ThrowOnError extends boolean = false>(
   options: Options<ListMentalModelsData, ThrowOnError>,
@@ -352,6 +342,27 @@ export const listMentalModels = <ThrowOnError extends boolean = false>(
     ListMentalModelsErrors,
     ThrowOnError
   >({ url: "/v1/default/banks/{bank_id}/mental-models", ...options });
+
+/**
+ * Create mental model
+ *
+ * Create a pinned mental model. Pinned models are user-defined and persist across refreshes.
+ */
+export const createMentalModel = <ThrowOnError extends boolean = false>(
+  options: Options<CreateMentalModelData, ThrowOnError>,
+) =>
+  (options.client ?? client).post<
+    CreateMentalModelResponses,
+    CreateMentalModelErrors,
+    ThrowOnError
+  >({
+    url: "/v1/default/banks/{bank_id}/mental-models",
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...options.headers,
+    },
+  });
 
 /**
  * Delete mental model
@@ -388,9 +399,9 @@ export const getMentalModel = <ThrowOnError extends boolean = false>(
   });
 
 /**
- * Refresh all mental models (async)
+ * Refresh mental models (async)
  *
- * Submit a background job to refresh all mental models for a bank. The job will: 1) Derive structural models from the bank's goal, 2) Promote relevant entities to emergent models, 3) Generate summaries for all mental models. Use GET /banks/{bank_id}/operations to check progress.
+ * Submit a background job to refresh mental models for a bank. By default refreshes all subtypes. Optionally specify 'subtype' to only refresh 'structural' (from mission) or 'emergent' (from entities) models. Optionally pass tags to apply to newly created models. Use GET /banks/{bank_id}/operations to check progress.
  */
 export const refreshMentalModels = <ThrowOnError extends boolean = false>(
   options: Options<RefreshMentalModelsData, ThrowOnError>,
@@ -399,12 +410,36 @@ export const refreshMentalModels = <ThrowOnError extends boolean = false>(
     RefreshMentalModelsResponses,
     RefreshMentalModelsErrors,
     ThrowOnError
-  >({ url: "/v1/default/banks/{bank_id}/mental-models/refresh", ...options });
+  >({
+    url: "/v1/default/banks/{bank_id}/mental-models/refresh",
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...options.headers,
+    },
+  });
+
+/**
+ * Generate mental model content (async)
+ *
+ * Submit a background job to generate/refresh content for a specific mental model. This is useful for newly created learned models or to regenerate content for any model.
+ */
+export const generateMentalModel = <ThrowOnError extends boolean = false>(
+  options: Options<GenerateMentalModelData, ThrowOnError>,
+) =>
+  (options.client ?? client).post<
+    GenerateMentalModelResponses,
+    GenerateMentalModelErrors,
+    ThrowOnError
+  >({
+    url: "/v1/default/banks/{bank_id}/mental-models/{model_id}/generate",
+    ...options,
+  });
 
 /**
  * Research query
  *
- * Execute a research query against mental models. Returns a synthesized answer with sources.
+ * Execute a research query against mental models. Returns a synthesized answer with sources. Optionally filter mental models by tags (includes untagged models).
  */
 export const research = <ThrowOnError extends boolean = false>(
   options: Options<ResearchData, ThrowOnError>,
@@ -531,9 +566,26 @@ export const cancelOperation = <ThrowOnError extends boolean = false>(
   });
 
 /**
+ * Get operation status
+ *
+ * Get the status of a specific async operation. Returns 'pending', 'completed', or 'failed'. Completed operations are removed from storage, so 'completed' means the operation finished successfully.
+ */
+export const getOperationStatus = <ThrowOnError extends boolean = false>(
+  options: Options<GetOperationStatusData, ThrowOnError>,
+) =>
+  (options.client ?? client).get<
+    GetOperationStatusResponses,
+    GetOperationStatusErrors,
+    ThrowOnError
+  >({
+    url: "/v1/default/banks/{bank_id}/operations/{operation_id}",
+    ...options,
+  });
+
+/**
  * Get memory bank profile
  *
- * Get disposition traits and background for a memory bank. Auto-creates agent with defaults if not exists.
+ * Get disposition traits and mission for a memory bank. Auto-creates agent with defaults if not exists.
  */
 export const getBankProfile = <ThrowOnError extends boolean = false>(
   options: Options<GetBankProfileData, ThrowOnError>,
@@ -566,9 +618,32 @@ export const updateBankDisposition = <ThrowOnError extends boolean = false>(
   });
 
 /**
- * Add/merge memory bank background
+ * Set memory bank mission
  *
- * Add new background information or merge with existing. LLM intelligently resolves conflicts, normalizes to first person, and optionally infers disposition traits.
+ * Set the mission for this agent - who they are and what they're trying to accomplish.
+ */
+export const setBankMission = <ThrowOnError extends boolean = false>(
+  options: Options<SetBankMissionData, ThrowOnError>,
+) =>
+  (options.client ?? client).put<
+    SetBankMissionResponses,
+    SetBankMissionErrors,
+    ThrowOnError
+  >({
+    url: "/v1/default/banks/{bank_id}/mission",
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...options.headers,
+    },
+  });
+
+/**
+ * Add/merge memory bank background (deprecated)
+ *
+ * Deprecated: Use PUT /mission instead. This endpoint now updates the mission field.
+ *
+ * @deprecated
  */
 export const addBankBackground = <ThrowOnError extends boolean = false>(
   options: Options<AddBankBackgroundData, ThrowOnError>,
@@ -603,7 +678,7 @@ export const deleteBank = <ThrowOnError extends boolean = false>(
 /**
  * Create or update memory bank
  *
- * Create a new agent or update existing agent with disposition and background. Auto-fills missing fields with defaults.
+ * Create a new agent or update existing agent with disposition and mission. Auto-fills missing fields with defaults.
  */
 export const createOrUpdateBank = <ThrowOnError extends boolean = false>(
   options: Options<CreateOrUpdateBankData, ThrowOnError>,
