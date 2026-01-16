@@ -94,9 +94,6 @@ import type {
   RegenerateEntityObservationsData,
   RegenerateEntityObservationsErrors,
   RegenerateEntityObservationsResponses,
-  ResearchData,
-  ResearchErrors,
-  ResearchResponses,
   RetainMemoriesData,
   RetainMemoriesErrors,
   RetainMemoriesResponses,
@@ -434,27 +431,6 @@ export const generateMentalModel = <ThrowOnError extends boolean = false>(
   >({
     url: "/v1/default/banks/{bank_id}/mental-models/{model_id}/generate",
     ...options,
-  });
-
-/**
- * Research query
- *
- * Execute a research query against mental models. Returns a synthesized answer with sources. Optionally filter mental models by tags (includes untagged models).
- */
-export const research = <ThrowOnError extends boolean = false>(
-  options: Options<ResearchData, ThrowOnError>,
-) =>
-  (options.client ?? client).post<
-    ResearchResponses,
-    ResearchErrors,
-    ThrowOnError
-  >({
-    url: "/v1/default/banks/{bank_id}/research",
-    ...options,
-    headers: {
-      "Content-Type": "application/json",
-      ...options.headers,
-    },
   });
 
 /**

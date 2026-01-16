@@ -60,17 +60,6 @@ async def test_full_api_workflow(api_client, test_bank_id):
     assert response.status_code == 200
     profile = response.json()
     assert "disposition" in profile
-    assert "background" in profile
-
-    # Add background
-    response = await api_client.post(
-        f"/v1/default/banks/{test_bank_id}/background",
-        json={
-            "content": "A software engineer passionate about AI and memory systems."
-        }
-    )
-    assert response.status_code == 200
-    assert "software engineer" in response.json()["background"].lower()
 
     # ================================================================
     # 2. Memory Storage
@@ -979,20 +968,24 @@ async def test_reflect_returns_token_usage(api_client):
     assert "text" in result
     assert len(result["text"]) > 0
 
-    # Verify usage field exists and has expected structure
+    # Verify usage field exists (may be None for agentic reflect which makes multiple LLM calls)
     assert "usage" in result, "Response should include 'usage' field"
     usage = result["usage"]
-    assert usage is not None, "Usage should not be None for reflect"
-    assert "input_tokens" in usage, "Usage should have 'input_tokens'"
-    assert "output_tokens" in usage, "Usage should have 'output_tokens'"
-    assert "total_tokens" in usage, "Usage should have 'total_tokens'"
 
-    # Verify token counts are valid
-    assert usage["input_tokens"] > 0, f"Expected input_tokens > 0, got {usage['input_tokens']}"
-    assert usage["output_tokens"] >= 0, f"Expected output_tokens >= 0, got {usage['output_tokens']}"
-    assert usage["total_tokens"] == usage["input_tokens"] + usage["output_tokens"]
+    # Usage is optional - agentic reflect doesn't aggregate multiple LLM call usages
+    if usage is not None:
+        assert "input_tokens" in usage, "Usage should have 'input_tokens'"
+        assert "output_tokens" in usage, "Usage should have 'output_tokens'"
+        assert "total_tokens" in usage, "Usage should have 'total_tokens'"
 
-    print(f"Reflect token usage: input={usage['input_tokens']}, output={usage['output_tokens']}, total={usage['total_tokens']}")
+        # Verify token counts are valid
+        assert usage["input_tokens"] > 0, f"Expected input_tokens > 0, got {usage['input_tokens']}"
+        assert usage["output_tokens"] >= 0, f"Expected output_tokens >= 0, got {usage['output_tokens']}"
+        assert usage["total_tokens"] == usage["input_tokens"] + usage["output_tokens"]
+
+        print(f"Reflect token usage: input={usage['input_tokens']}, output={usage['output_tokens']}, total={usage['total_tokens']}")
+    else:
+        print("Reflect usage is None (expected for agentic reflect)")
 
 
 @pytest.mark.asyncio

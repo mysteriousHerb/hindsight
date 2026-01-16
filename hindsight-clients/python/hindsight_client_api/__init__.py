@@ -51,6 +51,7 @@ from hindsight_client_api.models.chunk_include_options import ChunkIncludeOption
 from hindsight_client_api.models.chunk_response import ChunkResponse
 from hindsight_client_api.models.create_bank_request import CreateBankRequest
 from hindsight_client_api.models.create_mental_model_request import CreateMentalModelRequest
+from hindsight_client_api.models.created_mental_model import CreatedMentalModel
 from hindsight_client_api.models.delete_document_response import DeleteDocumentResponse
 from hindsight_client_api.models.delete_response import DeleteResponse
 from hindsight_client_api.models.disposition_traits import DispositionTraits
@@ -88,8 +89,6 @@ from hindsight_client_api.models.reflect_response import ReflectResponse
 from hindsight_client_api.models.reflect_tool_call import ReflectToolCall
 from hindsight_client_api.models.reflect_trace import ReflectTrace
 from hindsight_client_api.models.refresh_mental_models_request import RefreshMentalModelsRequest
-from hindsight_client_api.models.research_request import ResearchRequest
-from hindsight_client_api.models.research_response import ResearchResponse
 from hindsight_client_api.models.retain_request import RetainRequest
 from hindsight_client_api.models.retain_response import RetainResponse
 from hindsight_client_api.models.tag_item import TagItem

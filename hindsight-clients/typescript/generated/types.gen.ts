@@ -338,6 +338,32 @@ export type CreateMentalModelRequest = {
 };
 
 /**
+ * CreatedMentalModel
+ *
+ * A mental model created during reflection.
+ */
+export type CreatedMentalModel = {
+  /**
+   * Id
+   *
+   * Mental model ID
+   */
+  id: string;
+  /**
+   * Name
+   *
+   * Human-readable name
+   */
+  name: string;
+  /**
+   * Description
+   *
+   * What this model tracks
+   */
+  description: string;
+};
+
+/**
  * DeleteDocumentResponse
  *
  * Response model for delete document endpoint.
@@ -917,7 +943,7 @@ export type OperationResponse = {
   /**
    * Document Id
    */
-  document_id: string | null;
+  document_id?: string | null;
   /**
    * Created At
    */
@@ -978,6 +1004,10 @@ export type OperationsListResponse = {
    * Bank Id
    */
   bank_id: string;
+  /**
+   * Total
+   */
+  total: number;
   /**
    * Operations
    */
@@ -1338,6 +1368,12 @@ export type ReflectResponse = {
    * Execution trace of tool and LLM calls. Only present when include.tool_calls is set.
    */
   trace?: ReflectTrace | null;
+  /**
+   * Mental Models Created
+   *
+   * Mental models created during this reflection (via the learn tool).
+   */
+  mental_models_created?: Array<CreatedMentalModel>;
 };
 
 /**
@@ -1374,6 +1410,12 @@ export type ReflectToolCall = {
    * Execution time in milliseconds
    */
   duration_ms: number;
+  /**
+   * Iteration
+   *
+   * Iteration number (1-based) when this tool was called
+   */
+  iteration?: number;
 };
 
 /**
@@ -1414,56 +1456,6 @@ export type RefreshMentalModelsRequest = {
    * Only refresh models of this subtype. If not specified, refreshes all subtypes.
    */
   subtype?: "structural" | "emergent" | "pinned" | "learned" | null;
-};
-
-/**
- * ResearchRequest
- *
- * Request model for research endpoint.
- */
-export type ResearchRequest = {
-  /**
-   * Query
-   *
-   * The research question to answer
-   */
-  query: string;
-  /**
-   * Tags
-   *
-   * Filter mental models by tags (includes untagged models)
-   */
-  tags?: Array<string> | null;
-  /**
-   * Tags Match
-   *
-   * How to match tags: 'any' (OR), 'all' (AND), or 'exact'
-   */
-  tags_match?: "any" | "all" | "exact";
-};
-
-/**
- * ResearchResponse
- *
- * Response model for research endpoint.
- */
-export type ResearchResponse = {
-  /**
-   * Answer
-   */
-  answer: string;
-  /**
-   * Mental Models Used
-   */
-  mental_models_used?: Array<string>;
-  /**
-   * Facts Used
-   */
-  facts_used?: Array<string>;
-  /**
-   * Question Type
-   */
-  question_type?: string | null;
 };
 
 /**
@@ -2316,42 +2308,6 @@ export type GenerateMentalModelResponses = {
 
 export type GenerateMentalModelResponse =
   GenerateMentalModelResponses[keyof GenerateMentalModelResponses];
-
-export type ResearchData = {
-  body: ResearchRequest;
-  headers?: {
-    /**
-     * Authorization
-     */
-    authorization?: string | null;
-  };
-  path: {
-    /**
-     * Bank Id
-     */
-    bank_id: string;
-  };
-  query?: never;
-  url: "/v1/default/banks/{bank_id}/research";
-};
-
-export type ResearchErrors = {
-  /**
-   * Validation Error
-   */
-  422: HttpValidationError;
-};
-
-export type ResearchError = ResearchErrors[keyof ResearchErrors];
-
-export type ResearchResponses = {
-  /**
-   * Successful Response
-   */
-  200: ResearchResponse;
-};
-
-export type ResearchResponse2 = ResearchResponses[keyof ResearchResponses];
 
 export type ListDocumentsData = {
   body?: never;

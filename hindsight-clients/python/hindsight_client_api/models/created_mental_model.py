@@ -17,29 +17,19 @@ import pprint
 import re  # noqa: F401
 import json
 
-from pydantic import BaseModel, ConfigDict, Field, StrictStr, field_validator
-from typing import Any, ClassVar, Dict, List, Optional
+from pydantic import BaseModel, ConfigDict, Field, StrictStr
+from typing import Any, ClassVar, Dict, List
 from typing import Optional, Set
 from typing_extensions import Self
 
-class ResearchRequest(BaseModel):
+class CreatedMentalModel(BaseModel):
     """
-    Request model for research endpoint.
+    A mental model created during reflection.
     """ # noqa: E501
-    query: StrictStr = Field(description="The research question to answer")
-    tags: Optional[List[StrictStr]] = None
-    tags_match: Optional[StrictStr] = Field(default='any', description="How to match tags: 'any' (OR), 'all' (AND), or 'exact'")
-    __properties: ClassVar[List[str]] = ["query", "tags", "tags_match"]
-
-    @field_validator('tags_match')
-    def tags_match_validate_enum(cls, value):
-        """Validates the enum"""
-        if value is None:
-            return value
-
-        if value not in set(['any', 'all', 'exact']):
-            raise ValueError("must be one of enum values ('any', 'all', 'exact')")
-        return value
+    id: StrictStr = Field(description="Mental model ID")
+    name: StrictStr = Field(description="Human-readable name")
+    description: StrictStr = Field(description="What this model tracks")
+    __properties: ClassVar[List[str]] = ["id", "name", "description"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -59,7 +49,7 @@ class ResearchRequest(BaseModel):
 
     @classmethod
     def from_json(cls, json_str: str) -> Optional[Self]:
-        """Create an instance of ResearchRequest from a JSON string"""
+        """Create an instance of CreatedMentalModel from a JSON string"""
         return cls.from_dict(json.loads(json_str))
 
     def to_dict(self) -> Dict[str, Any]:
@@ -80,16 +70,11 @@ class ResearchRequest(BaseModel):
             exclude=excluded_fields,
             exclude_none=True,
         )
-        # set to None if tags (nullable) is None
-        # and model_fields_set contains the field
-        if self.tags is None and "tags" in self.model_fields_set:
-            _dict['tags'] = None
-
         return _dict
 
     @classmethod
     def from_dict(cls, obj: Optional[Dict[str, Any]]) -> Optional[Self]:
-        """Create an instance of ResearchRequest from a dict"""
+        """Create an instance of CreatedMentalModel from a dict"""
         if obj is None:
             return None
 
@@ -97,9 +82,9 @@ class ResearchRequest(BaseModel):
             return cls.model_validate(obj)
 
         _obj = cls.model_validate({
-            "query": obj.get("query"),
-            "tags": obj.get("tags"),
-            "tags_match": obj.get("tags_match") if obj.get("tags_match") is not None else 'any'
+            "id": obj.get("id"),
+            "name": obj.get("name"),
+            "description": obj.get("description")
         })
         return _obj
 
