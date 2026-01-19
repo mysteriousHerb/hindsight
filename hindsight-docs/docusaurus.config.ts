@@ -237,7 +237,7 @@ const config: Config = {
           items: [
             {
               label: 'Developer Guide',
-              to: '/developer',
+              to: '/',
             },
             {
               label: 'API Reference',
