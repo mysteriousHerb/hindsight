@@ -17,6 +17,16 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
@@ -177,6 +187,7 @@ export function MentalModelsView() {
 
   // Delete state
   const [deletingModel, setDeletingModel] = useState<string | null>(null);
+  const [modelToDelete, setModelToDelete] = useState<MentalModel | null>(null);
 
   // Edit state
   const [editingModel, setEditingModel] = useState<MentalModel | null>(null);
@@ -350,10 +361,17 @@ export function MentalModelsView() {
     }
   };
 
-  const handleDeleteModel = async (modelId: string) => {
-    if (!currentBank) return;
+  const requestDeleteModel = (model: MentalModel) => {
+    setModelToDelete(model);
+  };
 
+  const confirmDeleteModel = async () => {
+    if (!currentBank || !modelToDelete) return;
+
+    const modelId = modelToDelete.id;
     setDeletingModel(modelId);
+    setModelToDelete(null);
+
     try {
       await client.deleteMentalModel(currentBank, modelId);
       await loadMentalModels();
@@ -1122,11 +1140,38 @@ export function MentalModelsView() {
             onClose={() => setSelectedModel(null)}
             onRegenerated={silentRefreshModels}
             onEdit={() => handleStartEdit(selectedModel)}
-            onDelete={() => handleDeleteModel(selectedModel.id)}
+            onDelete={() => requestDeleteModel(selectedModel)}
             deleting={deletingModel === selectedModel.id}
           />
         </div>
       )}
+
+      {/* Delete Confirmation Dialog */}
+      <AlertDialog open={!!modelToDelete} onOpenChange={(open) => !open && setModelToDelete(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              Delete {modelToDelete?.subtype === "directive" ? "Directive" : "Mental Model"}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete{" "}
+              <span className="font-semibold">&quot;{modelToDelete?.name}&quot;</span>?
+              <br />
+              <br />
+              <span className="text-destructive font-semibold">This action cannot be undone.</span>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter className="flex-row justify-end space-x-2">
+            <AlertDialogCancel className="mt-0">Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={confirmDeleteModel}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
@@ -1326,12 +1371,12 @@ function MentalModelDetailPanel({
     setVersionObservations([]);
   };
 
-  const handleRegenerate = async () => {
+  const handleRegenerate = async (force: boolean = false) => {
     if (!currentBank) return;
 
     setRegenerateStatus({ status: "scheduling" });
     try {
-      const result = await client.refreshMentalModel(currentBank, model.id);
+      const result = await client.refreshMentalModel(currentBank, model.id, force);
       if (result.operation_id) {
         setRegenerateStatus({ status: "pending" });
         pollRegenerateStatus(result.operation_id);
@@ -1485,43 +1530,57 @@ function MentalModelDetailPanel({
                 <History className="w-4 h-4 mr-1" />
                 History
               </Button>
-              <Button
-                variant={regenerateStatus?.status === "completed" ? "default" : "outline"}
-                size="sm"
-                onClick={handleRegenerate}
-                disabled={
-                  !!regenerateStatus &&
-                  regenerateStatus.status !== "completed" &&
-                  regenerateStatus.status !== "failed"
-                }
-                className={`h-8 ${
-                  regenerateStatus?.status === "completed"
-                    ? "bg-emerald-500 hover:bg-emerald-600"
-                    : regenerateStatus?.status === "failed"
-                      ? "border-rose-500 text-rose-500"
-                      : ""
-                }`}
-              >
-                {regenerateStatus?.status === "scheduling" ||
-                regenerateStatus?.status === "pending" ? (
-                  <Loader2 className="w-4 h-4 mr-1 animate-spin" />
-                ) : regenerateStatus?.status === "completed" ? (
-                  <Check className="w-4 h-4 mr-1" />
-                ) : regenerateStatus?.status === "failed" ? (
-                  <X className="w-4 h-4 mr-1" />
-                ) : (
-                  <RefreshCw className="w-4 h-4 mr-1" />
-                )}
-                {regenerateStatus?.status === "scheduling"
-                  ? "Scheduling..."
-                  : regenerateStatus?.status === "pending"
-                    ? "Refreshing..."
-                    : regenerateStatus?.status === "completed"
-                      ? "Done!"
-                      : regenerateStatus?.status === "failed"
-                        ? "Failed"
-                        : "Refresh"}
-              </Button>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    variant={regenerateStatus?.status === "completed" ? "default" : "outline"}
+                    size="sm"
+                    disabled={
+                      !!regenerateStatus &&
+                      regenerateStatus.status !== "completed" &&
+                      regenerateStatus.status !== "failed"
+                    }
+                    className={`h-8 ${
+                      regenerateStatus?.status === "completed"
+                        ? "bg-emerald-500 hover:bg-emerald-600"
+                        : regenerateStatus?.status === "failed"
+                          ? "border-rose-500 text-rose-500"
+                          : ""
+                    }`}
+                  >
+                    {regenerateStatus?.status === "scheduling" ||
+                    regenerateStatus?.status === "pending" ? (
+                      <Loader2 className="w-4 h-4 mr-1 animate-spin" />
+                    ) : regenerateStatus?.status === "completed" ? (
+                      <Check className="w-4 h-4 mr-1" />
+                    ) : regenerateStatus?.status === "failed" ? (
+                      <X className="w-4 h-4 mr-1" />
+                    ) : (
+                      <RefreshCw className="w-4 h-4 mr-1" />
+                    )}
+                    {regenerateStatus?.status === "scheduling"
+                      ? "Scheduling..."
+                      : regenerateStatus?.status === "pending"
+                        ? "Refreshing..."
+                        : regenerateStatus?.status === "completed"
+                          ? "Done!"
+                          : regenerateStatus?.status === "failed"
+                            ? "Failed"
+                            : "Refresh"}
+                    <ChevronDown className="w-3 h-3 ml-1" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem onClick={() => handleRegenerate(false)}>
+                    <RefreshCw className="w-4 h-4" />
+                    Refresh
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => handleRegenerate(true)}>
+                    <AlertTriangle className="w-4 h-4 text-amber-500" />
+                    Force Refresh
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
             </>
           )}
           <Button variant="ghost" size="sm" onClick={onClose} className="h-8 w-8 p-0">
@@ -1777,26 +1836,27 @@ function MentalModelDetailPanel({
 
         {/* Action buttons for user-managed models */}
         {(model.subtype === "pinned" || model.subtype === "directive") && (
-          <div className="pt-4 border-t border-border space-y-2">
+          <div className="pt-4 border-t border-border flex gap-2">
             {onEdit && (
-              <Button variant="outline" onClick={onEdit} className="w-full">
+              <Button variant="outline" size="sm" onClick={onEdit}>
                 <Pencil className="h-4 w-4 mr-2" />
-                Edit this {model.subtype === "directive" ? "directive" : "mental model"}
+                Edit
               </Button>
             )}
             {onDelete && (
               <Button
                 variant="outline"
+                size="sm"
                 onClick={onDelete}
                 disabled={deleting}
-                className="w-full text-muted-foreground hover:text-rose-500 hover:border-rose-500 hover:bg-rose-500/10"
+                className="text-muted-foreground hover:text-rose-500 hover:border-rose-500 hover:bg-rose-500/10"
               >
                 {deleting ? (
                   <Loader2 className="h-4 w-4 mr-2 animate-spin" />
                 ) : (
                   <Trash2 className="h-4 w-4 mr-2" />
                 )}
-                Delete this {model.subtype === "directive" ? "directive" : "mental model"}
+                Delete
               </Button>
             )}
           </div>

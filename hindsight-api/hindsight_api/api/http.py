@@ -2541,18 +2541,30 @@ def _register_routes(app: FastAPI):
             logger.error(f"Error in PATCH /v1/default/banks/{bank_id}/mental-models/{model_id}: {error_detail}")
             raise HTTPException(status_code=500, detail=str(e))
 
+    class RefreshMentalModelRequest(BaseModel):
+        """Request model for refresh single mental model endpoint."""
+
+        model_config = ConfigDict(json_schema_extra={"example": {"force": True}})
+
+        force: bool = Field(
+            default=False,
+            description="Force refresh even if the model appears up-to-date based on freshness checks.",
+        )
+
     @app.post(
         "/v1/default/banks/{bank_id}/mental-models/{model_id}/refresh",
         response_model=AsyncOperationSubmitResponse,
         summary="Refresh mental model content (async)",
         description="Submit a background job to refresh content for a specific mental model. "
-        "This is useful for newly created learned models or to refresh content for any model.",
+        "This is useful for newly created learned models or to refresh content for any model. "
+        "Use force=true to bypass freshness checks and force a refresh.",
         operation_id="refresh_mental_model",
         tags=["Mental Models"],
     )
     async def api_refresh_mental_model(
         bank_id: str,
         model_id: str,
+        body: RefreshMentalModelRequest | None = None,
         request_context: RequestContext = Depends(get_request_context),
     ):
         """Refresh content for a specific mental model."""
@@ -2561,6 +2573,7 @@ def _register_routes(app: FastAPI):
                 bank_id=bank_id,
                 model_id=model_id,
                 request_context=request_context,
+                force=body.force if body else False,
             )
             return AsyncOperationSubmitResponse(
                 operation_id=result["operation_id"],

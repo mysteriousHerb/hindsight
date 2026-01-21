@@ -736,17 +736,19 @@ class MemoryEngine(MemoryEngineInterface):
         Refreshes content for a specific mental model.
 
         Args:
-            task_dict: Dict with 'bank_id', 'model_id', 'operation_id'
+            task_dict: Dict with 'bank_id', 'model_id', 'operation_id', 'force'
         """
         bank_id = task_dict.get("bank_id")
         model_id = task_dict.get("model_id")
         operation_id = task_dict.get("operation_id")
+        force = task_dict.get("force", False)
 
         if not bank_id or not model_id:
             raise ValueError("bank_id and model_id are required for refresh mental model task")
 
         logger.info(
-            f"[MENTAL_MODEL_TASK] Starting refresh for model_id={model_id}, bank_id={bank_id}, operation_id={operation_id}"
+            f"[MENTAL_MODEL_TASK] Starting refresh for model_id={model_id}, bank_id={bank_id}, "
+            f"operation_id={operation_id}, force={force}"
         )
 
         from hindsight_api.models import RequestContext
@@ -758,6 +760,7 @@ class MemoryEngine(MemoryEngineInterface):
             bank_id=bank_id,
             model_id=model_id,
             request_context=internal_context,
+            force=force,
         )
 
         if result:
@@ -4180,6 +4183,7 @@ class MemoryEngine(MemoryEngineInterface):
         *,
         request_context: "RequestContext",
         _return_agent_result: bool = False,
+        force: bool = False,
     ) -> dict[str, Any] | tuple[dict[str, Any] | None, Any] | None:
         """Refresh the observations for a mental model using the 4-phase reflect loop.
 
@@ -4196,6 +4200,7 @@ class MemoryEngine(MemoryEngineInterface):
             model_id: Mental model ID
             request_context: Request context for authentication
             _return_agent_result: Internal flag to return (model, agent_result) tuple for logging
+            force: If True, bypass freshness checks and force a refresh
 
         Returns:
             Updated mental model dict, or (model, agent_result) tuple if _return_agent_result=True
@@ -4257,11 +4262,14 @@ class MemoryEngine(MemoryEngineInterface):
             directives=directives,
         )
 
-        if not refresh_check.needs_refresh:
+        if not refresh_check.needs_refresh and not force:
             logger.info(f"[MENTAL_MODELS] Skipping refresh for '{model_id}' - nothing changed since last refresh")
             if _return_agent_result:
                 return (model, None)
             return model
+
+        if force:
+            logger.info(f"[MENTAL_MODELS] Force refresh requested for '{model_id}' - bypassing freshness check")
 
         logger.debug(
             f"[MENTAL_MODELS] Refresh needed for '{model_id}': {', '.join(refresh_check.reasons)} "
@@ -4445,6 +4453,7 @@ class MemoryEngine(MemoryEngineInterface):
         model_id: str,
         *,
         request_context: "RequestContext",
+        force: bool = False,
     ) -> dict[str, Any]:
         """
         Submit a background job to refresh a specific mental model.
@@ -4457,6 +4466,7 @@ class MemoryEngine(MemoryEngineInterface):
         Args:
             bank_id: Bank identifier
             model_id: Mental model ID to refresh
+            force: If True, bypass freshness checks and force a refresh
 
         Returns:
             Dict with operation_id to track progress
@@ -4493,6 +4503,7 @@ class MemoryEngine(MemoryEngineInterface):
             "operation_id": str(operation_id),
             "bank_id": bank_id,
             "model_id": model_id,
+            "force": force,
         }
 
         await self._task_backend.submit_task(task_payload)

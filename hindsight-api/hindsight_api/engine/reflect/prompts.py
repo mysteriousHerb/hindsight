@@ -383,44 +383,87 @@ Do NOT fabricate information that has no basis in the retrieved data."""
 # 4-Phase Mental Model Reflect Prompts
 # =============================================================================
 
-SEED_PHASE_SYSTEM_PROMPT = """You are analyzing memories to discover NEW patterns and generate candidate observations.
+SEED_PHASE_SYSTEM_PROMPT = """You are analyzing memories to build a mental model.
 
-Your task is to identify potential observations (beliefs, preferences, patterns, behaviors) that could be part of a mental model about this person/topic.
+## CRITICAL: Choose the Right Format Based on the Model's Purpose
 
-## Important: Avoid Redundancy
-If existing observations are provided, DO NOT generate candidates that are essentially the same.
-Focus on discovering NEW patterns not already covered by existing observations.
+First, read the "Topic Focus" (the model's description) and decide:
 
-## Rules
-- Generate 5-15 candidate observations for NEW patterns only
-- Each candidate should be specific and testable (can be supported or contradicted by evidence)
-- Note which memory IDs inspired each candidate (these are seeds, not final evidence)
-- Focus on patterns that appear MULTIPLE TIMES across many memories - the more the better
-- The best candidates are ones you can find 10, 20, or even 50+ supporting memories for
-- Skip patterns that are already covered by existing observations
+**Option A - Consolidated Reference Document** (use when the purpose is to capture structured knowledge):
+- The model's purpose describes mapping, tracking, cataloging, or building a reference
+- Examples: "Map customers to locations", "Track routes", "Record which person is where"
+- Generate exactly 1 candidate containing THE ACTUAL DATA in a MARKDOWN TABLE
+- **CRITICAL: Output the actual table with real data, NOT a description of what the table would contain**
+- Include every entity/mapping you can extract from the memories - be exhaustive
+
+**Option B - Behavioral Observations** (use for patterns, beliefs, preferences):
+- The model's purpose is about understanding behaviors, patterns, or preferences
+- Examples: "Learn about this person", "Track preferences", "Understand habits"
+- Generate 5-15 separate observation candidates about different patterns
 
 ## Output Format
-Return a JSON array of candidate observations:
 ```json
 {
   "candidates": [
     {
-      "content": "The specific observation/belief/pattern - be detailed and specific",
-      "seed_memory_ids": ["memory_id_1", "memory_id_2", "memory_id_3"]
+      "content": "The observation content (actual table with data for Option A, prose for Option B)",
+      "seed_memory_ids": ["memory_id_1", "memory_id_2", ...]
     }
   ]
 }
 ```
 
-Focus on patterns that appear multiple times or have strong signals. Don't generate obvious or trivial observations.
-Prefer candidates with MORE seed memories - they're more likely to be real patterns.
-Return an empty candidates array if no genuinely new patterns are found."""
+## Example: Option A - Reference Document (CORRECT)
+If the topic is "Map each customer to their office location":
+```json
+{
+  "candidates": [
+    {
+      "content": "## Customer Office Directory\n\n| Customer | Company | Room | Floor | Door |\n|----------|---------|------|-------|------|\n| Peter Collins | Recruitment Agency | 101 | 1 | door_west_101 |\n| Dr. Amanda Lee | Health First Clinic | 103 | 1 | door_west_103 |\n| James Chen | Tech Solutions Inc | 101 | 1 | door_west_101 |\n| Thomas Moore | Music Academy | 202 | 2 | door_east_202 |\n\n### Building Layout\n- Lobby → stairs_up → Floor 1 Hallway\n- Floor 1 Hallway has doors to rooms 101, 102, 103\n- Floor 1 Hallway → stairs_up → Floor 2 Hallway\n- Floor 2 Hallway has doors to rooms 201, 202",
+      "seed_memory_ids": ["id1", "id2", "id3", "id4", "id5", "id6"]
+    }
+  ]
+}
+```
+
+## Example: Option A - Reference Document (WRONG - do NOT do this)
+```json
+{
+  "candidates": [
+    {
+      "content": "The table lists each customer with their company, room, floor, and door.",
+      "seed_memory_ids": ["id1", "id2"]
+    }
+  ]
+}
+```
+^ This is WRONG because it describes the table instead of containing the actual data.
+
+## Example: Option B - Behavioral Observations
+If the topic is "Learn about Dr. Amanda Lee's preferences":
+```json
+{
+  "candidates": [
+    {"content": "Dr. Amanda Lee prefers morning appointments", "seed_memory_ids": ["id1", "id2"]},
+    {"content": "Dr. Amanda Lee is meticulous about medical records", "seed_memory_ids": ["id3", "id4"]}
+  ]
+}
+```
+
+## Rules
+- DO NOT mix formats - either one big table OR multiple observations
+- For Option A: Output THE ACTUAL DATA in table format, not a description of it
+- For Option A: be EXHAUSTIVE, include EVERY data point from ALL memories
+- For Option B: focus on patterns that appear multiple times
+- Skip patterns already covered by existing observations
+- Return empty candidates array if nothing new to add"""
 
 
 def build_seed_phase_prompt(
     memories: list[dict],
     topic: str | None = None,
     existing_observations: list[dict] | None = None,
+    subtype: str | None = None,
 ) -> str:
     """Build the user prompt for the seed phase.
 
@@ -428,25 +471,24 @@ def build_seed_phase_prompt(
         memories: List of memories to analyze
         topic: Optional topic focus for the mental model
         existing_observations: Optional list of existing observations to avoid rediscovering
+        subtype: Optional mental model subtype (not currently used, kept for API compatibility)
     """
     parts = []
 
     if topic:
-        parts.append(f"## Topic Focus\n{topic}\n")
+        parts.append(f"## Topic Focus (READ THIS TO DECIDE FORMAT)\n{topic}\n")
 
-    # Include existing observations so we don't rediscover them
+    # Include existing observations for context
     if existing_observations:
-        parts.append("## Existing Observations (DO NOT regenerate these)")
-        parts.append("These patterns are already tracked. Focus on discovering NEW patterns:\n")
+        parts.append("## Existing Observations")
+        parts.append("Review existing content - update/extend if reference document, avoid if behavioral:\n")
         for i, obs in enumerate(existing_observations, 1):
             title = obs.get("title", "")
             content = obs.get("content", "")
             parts.append(f"{i}. **{title}**: {content}\n")
         parts.append("")
 
-    parts.append("## Memories to Analyze")
-    parts.append("Review these memories and identify patterns, preferences, beliefs, and behaviors:\n")
-
+    parts.append("## Memories to Analyze\n")
     for mem in memories:
         mem_id = mem.get("id", "unknown")
         content = mem.get("content", mem.get("text", ""))
@@ -454,12 +496,9 @@ def build_seed_phase_prompt(
         parts.append(f"[{mem_id}] ({timestamp}): {content}\n")
 
     parts.append("\n## Instructions")
-    if existing_observations:
-        parts.append("Generate candidate observations for NEW patterns not already covered above.")
-        parts.append("If all patterns are already covered by existing observations, return an empty candidates array.")
-    else:
-        parts.append("Generate candidate observations based on patterns you see in these memories.")
-    parts.append("Look for: recurring themes, stated preferences, behavioral patterns, beliefs, values, goals.")
+    parts.append("1. Read the Topic Focus above to understand the model's purpose")
+    parts.append("2. Decide: Is this a reference document (Option A) or behavioral observations (Option B)?")
+    parts.append("3. Generate candidates in the appropriate format")
 
     return "\n".join(parts)
 
@@ -758,5 +797,143 @@ def build_update_existing_prompt(observations_with_evidence: list[dict]) -> str:
     parts.append("1. Extract EXACT quotes from new supporting memories")
     parts.append("2. Flag observations with strong contradictions")
     parts.append("3. Return the updated observations with new evidence added")
+
+    return "\n".join(parts)
+
+
+# =============================================================================
+# Structural Model Extraction Prompts (Two-Phase)
+# =============================================================================
+
+STRUCTURAL_EXTRACT_SYSTEM_PROMPT = """You are extracting structured data from memories to build a reference document.
+
+## Your Task
+1. Read the model's PURPOSE to understand what kind of data to extract
+2. For each memory, extract the key information as a descriptive text line
+3. Provide a synthesis_prompt describing how to format the final table
+
+## Rules
+- Extract ONLY data explicitly stated in memories - don't infer
+- Include memory_id and exact quote for each extraction
+- extracted_text should be a concise description of the relevant data (e.g., "Peter Collins works at room 101")
+- Skip memories that don't contain relevant structured data
+
+## Output Format
+```json
+{
+  "extractions": [
+    {
+      "memory_id": "the-memory-id",
+      "extracted_text": "Customer: Peter Collins, Room: 101, Floor: 1, Door: door_west_101",
+      "quote": "Exact text supporting this extraction"
+    }
+  ],
+  "synthesis_prompt": "Create a table with columns: Customer, Room, Floor, Door. Group by floor."
+}
+```
+
+The synthesis_prompt tells the next phase how to format the data into a useful table."""
+
+
+def build_structural_extract_prompt(
+    memories: list[dict],
+    topic: str,
+) -> str:
+    """Build the user prompt for the structural extraction phase.
+
+    Args:
+        memories: List of memories to extract from
+        topic: The mental model's purpose/description
+    """
+    parts = []
+
+    parts.append(f"## Model Purpose\n{topic}")
+    parts.append("")
+
+    parts.append("## Memories to Process")
+    for mem in memories:
+        mem_id = mem.get("id", "unknown")
+        content = mem.get("content", mem.get("text", ""))
+        parts.append(f"\n[{mem_id}]: {content}")
+
+    parts.append("\n## Instructions")
+    parts.append("1. Based on the purpose, decide what data fields are relevant")
+    parts.append("2. Extract those fields from each memory")
+    parts.append("3. Provide a synthesis_prompt describing the ideal table structure")
+
+    return "\n".join(parts)
+
+
+STRUCTURAL_SYNTHESIZE_SYSTEM_PROMPT = """You are synthesizing extracted data into a consolidated reference document.
+
+## Your Task
+Take the extracted data points and create ONE comprehensive observation containing:
+1. A markdown table with all unique entries
+2. Any additional notes about patterns or structure
+
+## Rules
+- Deduplicate entries (same entity should appear once with most complete data)
+- Resolve conflicts by using the most recent or most detailed information
+- Include ALL extracted entities in the table
+- Group related information logically
+- Add a "Navigation/Structure Notes" section if relevant patterns exist
+
+## Output Format
+```json
+{
+  "title": "Short descriptive title (3-8 words)",
+  "content": "## Table Title\n\n| Col1 | Col2 | ... |\n|------|------|-----|\n| val1 | val2 | ... |\n\n### Additional Notes\n- Note 1\n- Note 2",
+  "evidence": [
+    {
+      "memory_id": "id",
+      "quote": "exact quote from extraction",
+      "relevance": "brief explanation"
+    }
+  ]
+}
+```
+
+Be exhaustive - include every unique data point from the extractions."""
+
+
+def build_structural_synthesize_prompt(
+    extractions: list[dict],
+    topic: str,
+    synthesis_guidance: str,
+    existing_content: str | None = None,
+) -> str:
+    """Build the user prompt for the structural synthesis phase.
+
+    Args:
+        extractions: List of extracted data points from phase 1
+        topic: The mental model's purpose/description
+        synthesis_guidance: Guidance from extraction phase on how to format the table
+        existing_content: Optional existing observation content to update
+    """
+    parts = []
+
+    parts.append(f"## Model Purpose\n{topic}")
+    parts.append("")
+
+    if synthesis_guidance:
+        parts.append(f"## Formatting Guidance\n{synthesis_guidance}")
+        parts.append("")
+
+    if existing_content:
+        parts.append("## Existing Content (update with new data)")
+        parts.append(existing_content)
+        parts.append("")
+
+    parts.append("## Extracted Data Points")
+    parts.append("```json")
+    parts.append(json.dumps(extractions, indent=2, default=str))
+    parts.append("```")
+
+    parts.append("\n## Instructions")
+    parts.append("1. Deduplicate entries (merge data for same entity)")
+    parts.append("2. Create a comprehensive markdown table based on the data")
+    parts.append("3. Add notes section for patterns/structure if relevant")
+    if existing_content:
+        parts.append("4. Merge with existing content - update changed entries, add new ones")
 
     return "\n".join(parts)

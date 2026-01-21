@@ -351,12 +351,14 @@ export class ControlPlaneClient {
 
   /**
    * Refresh content for a specific mental model (async)
+   * @param force - Force refresh even if up-to-date
    */
-  async refreshMentalModel(bankId: string, modelId: string) {
+  async refreshMentalModel(bankId: string, modelId: string, force: boolean = false) {
     return this.fetchApi<{ operation_id: string; message: string }>(
       `/api/banks/${bankId}/mental-models/${modelId}/refresh`,
       {
         method: "POST",
+        body: JSON.stringify({ force }),
       }
     );
   }

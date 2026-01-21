@@ -16,9 +16,13 @@ export async function POST(
       return NextResponse.json({ error: "model_id is required" }, { status: 400 });
     }
 
+    const body = await request.json().catch(() => ({}));
+    const force = body.force === true;
+
     const response = await sdk.refreshMentalModel({
       client: lowLevelClient,
       path: { bank_id: bankId, model_id: modelId },
+      body: { force },
     });
 
     if (response.error) {

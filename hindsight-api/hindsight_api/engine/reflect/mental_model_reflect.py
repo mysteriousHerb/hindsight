@@ -27,15 +27,18 @@ from .observations import (
     CandidateWithEvidence,
     Observation,
     ObservationEvidence,
-    verify_evidence_quotes,
 )
 from .prompts import (
     COMPARE_PHASE_SYSTEM_PROMPT,
     SEED_PHASE_SYSTEM_PROMPT,
+    STRUCTURAL_EXTRACT_SYSTEM_PROMPT,
+    STRUCTURAL_SYNTHESIZE_SYSTEM_PROMPT,
     UPDATE_EXISTING_SYSTEM_PROMPT,
     VALIDATE_PHASE_SYSTEM_PROMPT,
     build_compare_phase_prompt,
     build_seed_phase_prompt,
+    build_structural_extract_prompt,
+    build_structural_synthesize_prompt,
     build_update_existing_prompt,
     build_validate_phase_prompt,
 )
@@ -377,6 +380,313 @@ class ObservationWithEvidence(BaseModel):
     contradicting_memories: list[dict] = Field(default_factory=list, description="Newly found contradicting memories")
 
 
+# =============================================================================
+# Structural Extraction Models (Two-Phase)
+# =============================================================================
+
+
+class StructuralExtraction(BaseModel):
+    """A single extracted data point from a memory."""
+
+    memory_id: str = Field(description="ID of the source memory")
+    extracted_text: str = Field(description="The key information extracted from this memory")
+    quote: str = Field(default="", description="Exact text from the memory")
+
+
+class StructuralExtractPhaseOutput(BaseModel):
+    """Output from the structural extraction phase."""
+
+    extractions: list[StructuralExtraction] = Field(default_factory=list)
+    synthesis_prompt: str = Field(
+        default="",
+        description="Guidance for how to format the data into a table (columns, grouping, notes)",
+    )
+
+
+class StructuralSynthesizeEvidence(BaseModel):
+    """Evidence item for structural synthesis."""
+
+    memory_id: str = Field(description="ID of the source memory")
+    quote: str = Field(description="Exact quote from the memory")
+    relevance: str = Field(default="", description="Brief explanation")
+
+
+class StructuralSynthesizeOutput(BaseModel):
+    """Output from the structural synthesis phase."""
+
+    title: str = Field(description="Short descriptive title")
+    content: str = Field(description="Markdown table and notes")
+    evidence: list[StructuralSynthesizeEvidence] = Field(default_factory=list)
+
+
+async def run_structural_model_reflect(
+    llm_config: "LLMProvider",
+    bank_id: str,
+    mental_model_id: str,
+    mental_model_name: str,
+    existing_observations: list[dict],
+    current_version: int,
+    get_diverse_memories_fn: Callable[[], Awaitable[list[dict]]],
+    topic: str,
+) -> MentalModelReflectResult:
+    """
+    Execute the two-phase structural extraction for reference document models.
+
+    Phase 1: EXTRACT - Extract structured data points from each memory
+    Phase 2: SYNTHESIZE - Aggregate extractions into a consolidated table
+
+    The LLM decides what fields/columns to use based on the topic and content.
+
+    Args:
+        llm_config: LLM provider instance
+        bank_id: Bank identifier
+        mental_model_id: Mental model ID
+        mental_model_name: Human-readable model name
+        existing_observations: Current observations in the mental model
+        current_version: Current version number of the mental model
+        get_diverse_memories_fn: Async function to get diverse memory sample
+        topic: The mental model's description
+
+    Returns:
+        MentalModelReflectResult with a single consolidated observation
+    """
+    start_time = time.time()
+    total_input_tokens = 0
+    total_output_tokens = 0
+
+    logger.info(f"[STRUCTURAL_REFLECT] Starting structural extraction for '{mental_model_name}'")
+
+    # Get memories to analyze
+    memories = await get_diverse_memories_fn()
+    if not memories:
+        logger.info(f"[STRUCTURAL_REFLECT] No memories to analyze for '{mental_model_name}'")
+        return MentalModelReflectResult(
+            observations=[Observation.model_validate(obs) for obs in existing_observations],
+            version=current_version,
+            changes={"note": "No memories to analyze"},
+            phases_completed=["none"],
+            duration_ms=int((time.time() - start_time) * 1000),
+            memories_analyzed=0,
+        )
+
+    logger.info(f"[STRUCTURAL_REFLECT] Analyzing {len(memories)} memories")
+
+    # Phase 1: EXTRACT
+    extract_prompt = build_structural_extract_prompt(memories, topic)
+
+    try:
+        # Don't use response_format - parse JSON manually for better robustness
+        extract_response, extract_usage = await llm_config.call(
+            messages=[
+                {"role": "system", "content": STRUCTURAL_EXTRACT_SYSTEM_PROMPT},
+                {"role": "user", "content": extract_prompt},
+            ],
+            scope="structural_extract",
+            return_usage=True,
+            max_completion_tokens=8192,
+        )
+
+        if extract_usage:
+            total_input_tokens += extract_usage.input_tokens
+            total_output_tokens += extract_usage.output_tokens
+
+        # Parse the response - could be string, dict, or Pydantic model
+        def parse_response(resp) -> tuple[list[dict], str]:
+            """Parse the extraction response into extractions list and synthesis_prompt."""
+            # If it's a string, try to parse as JSON
+            if isinstance(resp, str):
+                # Find JSON in the response (might have markdown code blocks)
+                resp = resp.strip()
+                if resp.startswith("```"):
+                    # Extract content from code block
+                    lines = resp.split("\n")
+                    json_lines = []
+                    in_block = False
+                    for line in lines:
+                        if line.startswith("```") and not in_block:
+                            in_block = True
+                            continue
+                        elif line.startswith("```") and in_block:
+                            break
+                        elif in_block:
+                            json_lines.append(line)
+                    resp = "\n".join(json_lines)
+                try:
+                    resp = json.loads(resp)
+                except json.JSONDecodeError:
+                    logger.warning("[STRUCTURAL_REFLECT] Failed to parse response as JSON")
+                    return [], ""
+
+            # Now resp should be a dict
+            if hasattr(resp, "model_dump"):
+                resp = resp.model_dump()
+
+            if isinstance(resp, dict):
+                raw_extractions = resp.get("extractions", [])
+                synthesis_prompt = resp.get("synthesis_prompt", "")
+
+                # Parse each extraction
+                parsed = []
+                for e in raw_extractions:
+                    if isinstance(e, str):
+                        try:
+                            e = json.loads(e)
+                        except json.JSONDecodeError:
+                            continue
+                    if isinstance(e, dict) and "memory_id" in e:
+                        parsed.append(e)
+                    elif hasattr(e, "model_dump"):
+                        parsed.append(e.model_dump())
+
+                return parsed, synthesis_prompt
+
+            return [], ""
+
+        extractions, synthesis_prompt = parse_response(extract_response)
+
+        logger.info(f"[STRUCTURAL_REFLECT] Phase 1 extracted {len(extractions)} data points")
+
+    except Exception as e:
+        logger.error(f"[STRUCTURAL_REFLECT] Extract phase failed: {e}")
+        return MentalModelReflectResult(
+            observations=[Observation.model_validate(obs) for obs in existing_observations],
+            version=current_version,
+            changes={"error": f"Extract phase failed: {e}"},
+            phases_completed=["extract_failed"],
+            duration_ms=int((time.time() - start_time) * 1000),
+            memories_analyzed=len(memories),
+        )
+
+    if not extractions:
+        logger.info(f"[STRUCTURAL_REFLECT] No data extracted for '{mental_model_name}'")
+        return MentalModelReflectResult(
+            observations=[Observation.model_validate(obs) for obs in existing_observations],
+            version=current_version,
+            changes={"note": "No structured data found in memories"},
+            phases_completed=["extract"],
+            duration_ms=int((time.time() - start_time) * 1000),
+            memories_analyzed=len(memories),
+        )
+
+    # Phase 2: SYNTHESIZE
+    existing_content = None
+    if existing_observations:
+        # Use the first observation's content as existing (structural models have 1 observation)
+        existing_content = existing_observations[0].get("content")
+
+    synthesize_prompt = build_structural_synthesize_prompt(extractions, topic, synthesis_prompt, existing_content)
+
+    try:
+        synth_response, synth_usage = await llm_config.call(
+            messages=[
+                {"role": "system", "content": STRUCTURAL_SYNTHESIZE_SYSTEM_PROMPT},
+                {"role": "user", "content": synthesize_prompt},
+            ],
+            response_format=StructuralSynthesizeOutput,
+            scope="structural_synthesize",
+            return_usage=True,
+            max_completion_tokens=16384,  # Higher limit for large tables
+        )
+
+        if synth_usage:
+            total_input_tokens += synth_usage.input_tokens
+            total_output_tokens += synth_usage.output_tokens
+
+        # Parse synthesis output
+        if hasattr(synth_response, "title"):
+            title = synth_response.title
+            content = synth_response.content
+            evidence_list = [e.model_dump() for e in synth_response.evidence] if synth_response.evidence else []
+        elif isinstance(synth_response, dict):
+            title = synth_response.get("title", mental_model_name)
+            content = synth_response.get("content", "")
+            evidence_list = synth_response.get("evidence", [])
+        else:
+            title = mental_model_name
+            content = str(synth_response)
+            evidence_list = []
+
+        logger.info(f"[STRUCTURAL_REFLECT] Phase 2 synthesized '{title}' with {len(evidence_list)} evidence items")
+
+    except Exception as e:
+        logger.error(f"[STRUCTURAL_REFLECT] Synthesize phase failed: {e}")
+        return MentalModelReflectResult(
+            observations=[Observation.model_validate(obs) for obs in existing_observations],
+            version=current_version,
+            changes={"error": f"Synthesize phase failed: {e}"},
+            phases_completed=["extract", "synthesize_failed"],
+            duration_ms=int((time.time() - start_time) * 1000),
+            memories_analyzed=len(memories),
+            input_tokens=total_input_tokens,
+            output_tokens=total_output_tokens,
+            total_tokens=total_input_tokens + total_output_tokens,
+        )
+
+    # Build the single consolidated observation
+    # Convert evidence to ObservationEvidence format
+    evidence_objects = []
+    for ev in evidence_list:
+        try:
+            # Find timestamp from memory if available
+            memory_id = ev.get("memory_id", "")
+            timestamp = datetime.now(timezone.utc)
+            for mem in memories:
+                if mem.get("id") == memory_id:
+                    ts = mem.get("timestamp") or mem.get("created_at")
+                    if ts:
+                        if isinstance(ts, str):
+                            timestamp = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+                        elif isinstance(ts, datetime):
+                            timestamp = ts
+                    break
+
+            evidence_objects.append(
+                ObservationEvidence(
+                    memory_id=memory_id,
+                    quote=ev.get("quote", ""),
+                    relevance=ev.get("relevance", ""),
+                    timestamp=timestamp,
+                )
+            )
+        except Exception as e:
+            logger.warning(f"[STRUCTURAL_REFLECT] Failed to parse evidence: {e}")
+
+    # Create the single observation
+    new_observation = Observation(
+        title=title,
+        content=content,
+        evidence=evidence_objects,
+        created_at=datetime.now(timezone.utc),
+    )
+
+    duration_ms = int((time.time() - start_time) * 1000)
+
+    logger.info(
+        f"[STRUCTURAL_REFLECT] Completed for '{mental_model_name}': "
+        f"{len(extractions)} extractions → 1 observation, "
+        f"{len(evidence_objects)} evidence items, "
+        f"{duration_ms}ms"
+    )
+
+    return MentalModelReflectResult(
+        observations=[new_observation],
+        version=current_version + 1,
+        changes={
+            "structural_extraction": True,
+            "extractions_count": len(extractions),
+            "evidence_count": len(evidence_objects),
+        },
+        phases_completed=["extract", "synthesize"],
+        duration_ms=duration_ms,
+        memories_analyzed=len(memories),
+        candidates_generated=len(extractions),
+        candidates_validated=1,
+        input_tokens=total_input_tokens,
+        output_tokens=total_output_tokens,
+        total_tokens=total_input_tokens + total_output_tokens,
+    )
+
+
 async def run_mental_model_reflect(
     llm_config: "LLMProvider",
     bank_id: str,
@@ -418,6 +728,27 @@ async def run_mental_model_reflect(
     """
     reflect_id = f"mm-{bank_id[:8]}-{int(time.time() * 1000) % 100000}"
     start_time = time.time()
+
+    # ==========================================================================
+    # STRUCTURAL EXTRACTION: Use 2-phase approach for models with descriptions
+    # The extraction phase will understand the purpose and extract relevant data
+    # ==========================================================================
+    if topic:
+        logger.info(f"[MM-REFLECT {reflect_id}] Using structural extraction for topic: '{topic[:50]}...'")
+        return await run_structural_model_reflect(
+            llm_config=llm_config,
+            bank_id=bank_id,
+            mental_model_id=mental_model_id,
+            mental_model_name=mental_model_name,
+            existing_observations=existing_observations,
+            current_version=current_version,
+            get_diverse_memories_fn=get_diverse_memories_fn,
+            topic=topic,
+        )
+
+    # ==========================================================================
+    # BEHAVIORAL FLOW: No topic, use existing multi-phase observation generation
+    # ==========================================================================
     phases_completed: list[str] = []
     updated_existing: list[dict] = []
     contradicted_observations: list[str] = []
