@@ -93,12 +93,14 @@ async def run_consolidation_job(
         logger.debug(f"Consolidation disabled for bank {bank_id}")
         return {"status": "disabled", "bank_id": bank_id}
 
-    async with memory_engine._pool.acquire() as conn:
-        # Get bank profile and last_consolidated_at
+    pool = memory_engine._pool
+
+    # Get bank profile
+    async with pool.acquire() as conn:
         t0 = time.time()
         bank_row = await conn.fetchrow(
             f"""
-            SELECT bank_id, name, mission, last_consolidated_at
+            SELECT bank_id, name, mission
             FROM {fq_table("banks")}
             WHERE bank_id = $1
             """,
@@ -110,31 +112,51 @@ async def run_consolidation_job(
             return {"status": "bank_not_found", "bank_id": bank_id}
 
         mission = bank_row["mission"] or "General memory consolidation"
-        last_consolidated_at = bank_row["last_consolidated_at"]
         perf.record_timing("fetch_bank", time.time() - t0)
 
-        # Fetch memories created after last_consolidated_at (exclude mental_model type)
-        t0 = time.time()
-        if last_consolidated_at:
-            memories = await conn.fetch(
-                f"""
-                SELECT id, text, fact_type, occurred_start, event_date, tags
-                FROM {fq_table("memory_units")}
-                WHERE bank_id = $1 AND created_at > $2
-                  AND fact_type IN ('experience', 'world')
-                ORDER BY created_at ASC
-                LIMIT $3
-                """,
-                bank_id,
-                last_consolidated_at,
-                max_memories_per_batch,
-            )
-        else:
+        # Count total unconsolidated memories for progress logging
+        total_count = await conn.fetchval(
+            f"""
+            SELECT COUNT(*)
+            FROM {fq_table("memory_units")}
+            WHERE bank_id = $1
+              AND consolidated_at IS NULL
+              AND fact_type IN ('experience', 'world')
+            """,
+            bank_id,
+        )
+
+    if total_count == 0:
+        logger.debug(f"No new memories to consolidate for bank {bank_id}")
+        return {"status": "no_new_memories", "bank_id": bank_id, "memories_processed": 0}
+
+    logger.info(f"[CONSOLIDATION] bank={bank_id} total_unconsolidated={total_count}")
+    perf.log(f"[1] Found {total_count} pending memories to consolidate")
+
+    # Process each memory with individual commits for crash recovery
+    stats = {
+        "memories_processed": 0,
+        "mental_models_created": 0,
+        "mental_models_updated": 0,
+        "mental_models_merged": 0,
+        "actions_executed": 0,
+        "skipped": 0,
+    }
+
+    batch_num = 0
+    while True:
+        batch_num += 1
+        batch_start = time.time()
+
+        # Fetch next batch of unconsolidated memories
+        async with pool.acquire() as conn:
+            t0 = time.time()
             memories = await conn.fetch(
                 f"""
                 SELECT id, text, fact_type, occurred_start, event_date, tags
                 FROM {fq_table("memory_units")}
                 WHERE bank_id = $1
+                  AND consolidated_at IS NULL
                   AND fact_type IN ('experience', 'world')
                 ORDER BY created_at ASC
                 LIMIT $2
@@ -142,45 +164,16 @@ async def run_consolidation_job(
                 bank_id,
                 max_memories_per_batch,
             )
-        perf.record_timing("fetch_memories", time.time() - t0)
+            perf.record_timing("fetch_memories", time.time() - t0)
 
         if not memories:
-            logger.debug(f"No new memories to consolidate for bank {bank_id}")
-            # Update timestamp anyway to prevent reprocessing
-            await _update_last_consolidated_at(conn, bank_id)
-            return {"status": "no_new_memories", "bank_id": bank_id, "memories_processed": 0}
+            break  # No more unconsolidated memories
 
-        logger.info(
-            f"[CONSOLIDATION] bank={bank_id} memories={len(memories)} "
-            f"batch_size={max_memories_per_batch} since={last_consolidated_at or 'beginning'}"
-        )
-        perf.log(f"[1] Found {len(memories)} pending memories to consolidate")
+        for memory in memories:
+            mem_start = time.time()
 
-        # Process each memory sequentially
-        # Important: We process ALL pending memories before updating the watermark
-        # to avoid losing memories when many have the same timestamp
-        stats = {
-            "memories_processed": 0,
-            "mental_models_created": 0,
-            "mental_models_updated": 0,
-            "mental_models_merged": 0,
-            "actions_executed": 0,  # Total actions (can be > memories_processed due to multiple actions per fact)
-            "skipped": 0,
-        }
-
-        # Track processed memory IDs to avoid reprocessing
-        processed_ids: set[uuid.UUID] = set()
-        batch_num = 0
-
-        while memories:
-            batch_num += 1
-            batch_start = time.time()
-
-            for memory in memories:
-                if memory["id"] in processed_ids:
-                    continue
-
-                mem_start = time.time()
+            # Process the memory (uses its own connection internally)
+            async with pool.acquire() as conn:
                 result = await _process_memory(
                     conn=conn,
                     memory_engine=memory_engine,
@@ -190,117 +183,80 @@ async def run_consolidation_job(
                     request_context=request_context,
                     perf=perf,
                 )
-                mem_time = time.time() - mem_start
-                perf.record_timing("process_memory_total", mem_time)
 
-                processed_ids.add(memory["id"])
-                stats["memories_processed"] += 1
-
-                action = result.get("action")
-                if action == "created":
-                    stats["mental_models_created"] += 1
-                    stats["actions_executed"] += 1
-                elif action == "updated":
-                    stats["mental_models_updated"] += 1
-                    stats["actions_executed"] += 1
-                elif action == "merged":
-                    stats["mental_models_merged"] += 1
-                    stats["actions_executed"] += 1
-                elif action == "multiple":
-                    # Multiple actions from one fact (tag routing)
-                    stats["mental_models_created"] += result.get("created", 0)
-                    stats["mental_models_updated"] += result.get("updated", 0)
-                    stats["mental_models_merged"] += result.get("merged", 0)
-                    stats["actions_executed"] += result.get("total_actions", 0)
-                elif action == "skipped":
-                    stats["skipped"] += 1
-
-            batch_time = time.time() - batch_start
-            perf.log(
-                f"[2] Batch {batch_num}: {len(memories)} memories in {batch_time:.3f}s "
-                f"(avg {batch_time / len(memories):.3f}s/memory)"
-            )
-
-            # Fetch next batch of memories (excluding already processed)
-            t0 = time.time()
-            if last_consolidated_at:
-                memories = await conn.fetch(
+                # Mark memory as consolidated (committed immediately)
+                await conn.execute(
                     f"""
-                    SELECT id, text, fact_type, occurred_start, event_date, tags
-                    FROM {fq_table("memory_units")}
-                    WHERE bank_id = $1 AND created_at > $2
-                      AND fact_type IN ('experience', 'world')
-                      AND id != ALL($4)
-                    ORDER BY created_at ASC
-                    LIMIT $3
+                    UPDATE {fq_table("memory_units")}
+                    SET consolidated_at = NOW()
+                    WHERE id = $1
                     """,
-                    bank_id,
-                    last_consolidated_at,
-                    max_memories_per_batch,
-                    list(processed_ids),
+                    memory["id"],
                 )
-            else:
-                memories = await conn.fetch(
-                    f"""
-                    SELECT id, text, fact_type, occurred_start, event_date, tags
-                    FROM {fq_table("memory_units")}
-                    WHERE bank_id = $1
-                      AND fact_type IN ('experience', 'world')
-                      AND id != ALL($3)
-                    ORDER BY created_at ASC
-                    LIMIT $2
-                    """,
-                    bank_id,
-                    max_memories_per_batch,
-                    list(processed_ids),
+
+            mem_time = time.time() - mem_start
+            perf.record_timing("process_memory_total", mem_time)
+
+            stats["memories_processed"] += 1
+
+            action = result.get("action")
+            if action == "created":
+                stats["mental_models_created"] += 1
+                stats["actions_executed"] += 1
+            elif action == "updated":
+                stats["mental_models_updated"] += 1
+                stats["actions_executed"] += 1
+            elif action == "merged":
+                stats["mental_models_merged"] += 1
+                stats["actions_executed"] += 1
+            elif action == "multiple":
+                stats["mental_models_created"] += result.get("created", 0)
+                stats["mental_models_updated"] += result.get("updated", 0)
+                stats["mental_models_merged"] += result.get("merged", 0)
+                stats["actions_executed"] += result.get("total_actions", 0)
+            elif action == "skipped":
+                stats["skipped"] += 1
+
+            # Log progress periodically
+            if stats["memories_processed"] % 10 == 0:
+                logger.info(
+                    f"[CONSOLIDATION] bank={bank_id} progress: "
+                    f"{stats['memories_processed']}/{total_count} memories processed"
                 )
-            perf.record_timing("fetch_memories", time.time() - t0)
 
-        # Update last_consolidated_at only after ALL memories are processed
-        t0 = time.time()
-        await _update_last_consolidated_at(conn, bank_id)
-        perf.record_timing("update_watermark", time.time() - t0)
-
-        # Build summary
+        batch_time = time.time() - batch_start
         perf.log(
-            f"[3] Results: {stats['memories_processed']} memories → "
-            f"{stats['actions_executed']} actions "
-            f"({stats['mental_models_created']} created, "
-            f"{stats['mental_models_updated']} updated, "
-            f"{stats['mental_models_merged']} merged, "
-            f"{stats['skipped']} skipped)"
+            f"[2] Batch {batch_num}: {len(memories)} memories in {batch_time:.3f}s "
+            f"(avg {batch_time / len(memories):.3f}s/memory)"
         )
 
-        # Add timing breakdown
-        timing_parts = []
-        if "recall" in perf.timings:
-            timing_parts.append(f"recall={perf.timings['recall']:.3f}s")
-        if "llm" in perf.timings:
-            timing_parts.append(f"llm={perf.timings['llm']:.3f}s")
-        if "embedding" in perf.timings:
-            timing_parts.append(f"embedding={perf.timings['embedding']:.3f}s")
-        if "db_write" in perf.timings:
-            timing_parts.append(f"db_write={perf.timings['db_write']:.3f}s")
-
-        if timing_parts:
-            perf.log(f"[4] Timing breakdown: {', '.join(timing_parts)}")
-
-        perf.flush()
-
-        return {"status": "completed", "bank_id": bank_id, **stats}
-
-
-async def _update_last_consolidated_at(conn: "Connection", bank_id: str) -> None:
-    """Update the bank's last_consolidated_at timestamp."""
-    await conn.execute(
-        f"""
-        UPDATE {fq_table("banks")}
-        SET last_consolidated_at = $1
-        WHERE bank_id = $2
-        """,
-        datetime.now(timezone.utc),
-        bank_id,
+    # Build summary
+    perf.log(
+        f"[3] Results: {stats['memories_processed']} memories -> "
+        f"{stats['actions_executed']} actions "
+        f"({stats['mental_models_created']} created, "
+        f"{stats['mental_models_updated']} updated, "
+        f"{stats['mental_models_merged']} merged, "
+        f"{stats['skipped']} skipped)"
     )
+
+    # Add timing breakdown
+    timing_parts = []
+    if "recall" in perf.timings:
+        timing_parts.append(f"recall={perf.timings['recall']:.3f}s")
+    if "llm" in perf.timings:
+        timing_parts.append(f"llm={perf.timings['llm']:.3f}s")
+    if "embedding" in perf.timings:
+        timing_parts.append(f"embedding={perf.timings['embedding']:.3f}s")
+    if "db_write" in perf.timings:
+        timing_parts.append(f"db_write={perf.timings['db_write']:.3f}s")
+
+    if timing_parts:
+        perf.log(f"[4] Timing breakdown: {', '.join(timing_parts)}")
+
+    perf.flush()
+
+    return {"status": "completed", "bank_id": bank_id, **stats}
 
 
 async def _process_memory(

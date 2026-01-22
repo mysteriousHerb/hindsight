@@ -15,7 +15,7 @@ from hindsight_api.engine.reflect.agent import (
     _is_done_tool,
     run_reflect_agent,
 )
-from hindsight_api.engine.response_models import LLMToolCall, LLMToolCallResult
+from hindsight_api.engine.response_models import LLMToolCall, LLMToolCallResult, TokenUsage
 
 
 class TestToolNameNormalization:
@@ -70,8 +70,10 @@ class TestReflectAgentMocked:
         """Create a mock LLM provider."""
         llm = MagicMock()
         llm.call_with_tools = AsyncMock()
-        # Also mock call() for final iteration fallback
-        llm.call = AsyncMock(return_value="Fallback answer from final iteration")
+        # Also mock call() for final iteration fallback - returns (response, usage) tuple
+        llm.call = AsyncMock(
+            return_value=("Fallback answer from final iteration", TokenUsage(input_tokens=100, output_tokens=50, total_tokens=150))
+        )
         return llm
 
     @pytest.fixture

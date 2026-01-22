@@ -3671,13 +3671,22 @@ class MemoryEngine(MemoryEngineInterface):
             DirectiveRef(id=d.id, name=d.name, rules=d.rules) for d in agent_result.directives_applied
         ]
 
+        # Convert agent usage to TokenUsage format
+        from hindsight_api.engine.response_models import TokenUsage
+
+        usage = TokenUsage(
+            input_tokens=agent_result.usage.input_tokens,
+            output_tokens=agent_result.usage.output_tokens,
+            total_tokens=agent_result.usage.total_tokens,
+        )
+
         # Return response (compatible with existing API)
         result = ReflectResult(
             text=agent_result.text,
             based_on=based_on,
             new_opinions=[],  # Learnings stored as mental models
             structured_output=agent_result.structured_output,
-            usage=None,  # Token tracking not yet implemented for agentic loop
+            usage=usage,
             tool_trace=tool_trace_result,
             llm_trace=llm_trace_result,
             directives_applied=directives_applied_result,

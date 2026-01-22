@@ -2058,42 +2058,19 @@ def _register_routes(app: FastAPI):
                 )
                 total_documents = doc_count_result["count"] if doc_count_result else 0
 
-                # Get consolidation stats
-                bank_row = await conn.fetchrow(
+                # Get consolidation stats from memory-level tracking
+                consolidation_stats = await conn.fetchrow(
                     f"""
-                    SELECT last_consolidated_at
-                    FROM {fq_table("banks")}
+                    SELECT
+                        MAX(consolidated_at) as last_consolidated_at,
+                        COUNT(*) FILTER (WHERE consolidated_at IS NULL AND fact_type IN ('experience', 'world')) as pending
+                    FROM {fq_table("memory_units")}
                     WHERE bank_id = $1
                     """,
                     bank_id,
                 )
-                last_consolidated_at = bank_row["last_consolidated_at"] if bank_row else None
-
-                # Count memories pending consolidation (created after last_consolidated_at)
-                if last_consolidated_at:
-                    pending_consolidation_result = await conn.fetchrow(
-                        f"""
-                        SELECT COUNT(*) as count
-                        FROM {fq_table("memory_units")}
-                        WHERE bank_id = $1
-                          AND created_at > $2
-                          AND fact_type IN ('experience', 'world')
-                        """,
-                        bank_id,
-                        last_consolidated_at,
-                    )
-                else:
-                    # If never consolidated, count all experience/world memories
-                    pending_consolidation_result = await conn.fetchrow(
-                        f"""
-                        SELECT COUNT(*) as count
-                        FROM {fq_table("memory_units")}
-                        WHERE bank_id = $1
-                          AND fact_type IN ('experience', 'world')
-                        """,
-                        bank_id,
-                    )
-                pending_consolidation = pending_consolidation_result["count"] if pending_consolidation_result else 0
+                last_consolidated_at = consolidation_stats["last_consolidated_at"] if consolidation_stats else None
+                pending_consolidation = consolidation_stats["pending"] if consolidation_stats else 0
 
                 # Count total mental models
                 mental_model_count_result = await conn.fetchrow(
