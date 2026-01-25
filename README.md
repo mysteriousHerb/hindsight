@@ -20,13 +20,13 @@
 Hindsight™ is an agent memory system built to create smarter agents that learn over time. Most agent memory systems focus on recalling conversation history. Hindsight is focused on making agents that learn, not just remember.
 
 
-<video src="https://github.com/user-attachments/assets/dc8adaed-1f9c-4be7-97bb-536f1addb946" controls></video>
+<video src="https://github.com/user-attachments/assets/920f60ba-47f1-486e-ba52-a90013a23b6a" controls></video>
 
 It eliminates the shortcomings of alternative techniques such as RAG and knowledge graph and delivers state-of-the-art performance on long term memory tasks.
 
 ## Memory Performance & Accuracy
 
-Hindsight is the most accurate agent memory system according to benchmark performance. It has achieved state-of-the-art performance on the LongMemEval benchmark, widely used to assess memory system performance across a variety of conversational AI scenarios. The current reported performance of Hindsight and other agent memory solutions as of January 2026 is shown here:
+Hindsight is the most accurate agent memory system ever tested according to benchmark performance. It has achieved state-of-the-art performance on the LongMemEval benchmark, widely used to assess memory system performance across a variety of conversational AI scenarios. The current reported performance of Hindsight and other agent memory solutions as of January 2026 is shown here:
 
 ![Overview](./hindsight-docs/static/img/hindsight-bench.jpg)
 
@@ -38,7 +38,7 @@ Hindsight is being used in production at Fortune 500 enterprises and by a growin
 
 The easiest way use Hindsight with an existing agent is with the LLM Wrapper. You can add memory to your agent with 2 lines of code. That will swap your current LLM client out with the Hindsight wrapper. After that, memories will be stored and retrieved automatically as you make LLM calls.
 
-If you need more control over how and when your agent stores and recalls memories, there's also a simple API you can integrate with.
+If you need more control over how and when your agent stores and recalls memories, there's also a simple API you can integrate with using the SDKs or directly via HTTP.
 
 ![Hindsight Banner](./hindsight-docs/static/img/migration-code.png)
 
