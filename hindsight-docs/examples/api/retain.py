@@ -100,6 +100,18 @@ client.retain_batch(
 # [/docs:retain-with-document-tags]
 
 
+# [docs:retain-list-tags]
+# List all tags in a bank
+tags = client.list_tags(bank_id="my-bank")
+for tag in tags.items:
+    print(f"{tag.tag}: {tag.count} memories")
+
+# Search with wildcards (* matches any characters)
+user_tags = client.list_tags(bank_id="my-bank", q="user:*")
+admin_tags = client.list_tags(bank_id="my-bank", q="*-admin")
+# [/docs:retain-list-tags]
+
+
 # =============================================================================
 # Cleanup (not shown in docs)
 # =============================================================================
