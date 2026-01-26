@@ -1,6 +1,6 @@
 <div align="center">
 
-![Hindsight Banner](./hindsight-docs/static/img/banner.svg)
+![Hindsight Banner](./hindsight-docs/static/img/hindsight-github-banner.png)
 
 [Documentation](https://hindsight.vectorize.io) • [Paper](https://arxiv.org/abs/2512.12818) • [Cookbook](https://hindsight.vectorize.io/cookbook) • [Hindsight Cloud](https://vectorize.io/hindsight/cloud)
 
@@ -121,6 +121,27 @@ const client = new HindsightClient({ baseUrl: 'http://localhost:8888' });
 await client.retain('my-bank', 'Alice loves hiking in Yosemite');
 await client.recall('my-bank', 'What does Alice like?');
 ```
+
+---
+
+## Use Cases
+
+
+Hindsight is built to support conversational AI agents as well as agents that are intended to perform tasks autonomously. The ideal use case for Hindsight are agents that require a blend of these features such as AI employees that need to handle open-ended tasks, change behavior based on user feedback, and learn to perform complex tasks to automate work at a level that approximates a human work. Hindsight can be used with simple AI workflows like those built with n8n and other similar tools, but may be overkill for such applications.
+
+### Per-User Memories and Chat History
+
+One of the simpler use cases you can use Hindsight for is to personalize AI chatbots and other conversational agents by storing and recalling memories associated with individual users.
+
+<video src="https://github.com/user-attachments/assets/4805e8e1-e7d1-47c6-a4f8-2344a5ec8906" controls></video>
+
+The requirements for this use case usually look something like this:
+
+![Per-User Memories](./hindsight-docs/static/img/per-user-memory-requirements.png)
+
+Satisfying these requirements in Hindsight is straightforward. When new user inputs and tool calls are ingested into Hindsight using the retain operation, custom metadata can be used to enrich the new memories. Metadata provides a convenient way to isolate memories that need to be restricted to a given user. Once these are fed into the retain operation, any raw memories and mental models that get created can be filtered when retrieving relevant memories. 
+
+![Per-User Memories](./hindsight-docs/static/img/per-user-memory-howto.png)
 
 ---
 
