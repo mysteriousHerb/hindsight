@@ -171,6 +171,24 @@ class LinkExpansionRetriever(GraphRetriever):
             # Path: observation → source_memory_ids → world fact → entities →
             #       ALL world facts with those entities → their observations (excluding seeds)
             if fact_type == "observation":
+                # Debug: Check what source_memory_ids exist on seed observations
+                debug_sources = await conn.fetch(
+                    f"""
+                    SELECT id, source_memory_ids
+                    FROM {fq_table("memory_units")}
+                    WHERE id = ANY($1::uuid[])
+                    """,
+                    seed_ids,
+                )
+                source_ids_found = []
+                for row in debug_sources:
+                    if row["source_memory_ids"]:
+                        source_ids_found.extend(row["source_memory_ids"])
+                logger.debug(
+                    f"[LinkExpansion] observation graph: {len(seed_ids)} seeds, "
+                    f"{len(source_ids_found)} source_memory_ids found"
+                )
+
                 entity_rows = await conn.fetch(
                     f"""
                     WITH seed_sources AS (
@@ -215,6 +233,7 @@ class LinkExpansionRetriever(GraphRetriever):
                     self.max_entity_frequency,
                     budget,
                 )
+                logger.debug(f"[LinkExpansion] observation graph: found {len(entity_rows)} connected observations")
             else:
                 # For world/experience facts, use direct entity lookup
                 entity_rows = await conn.fetch(
@@ -264,11 +283,69 @@ class LinkExpansionRetriever(GraphRetriever):
                 budget,
             )
 
+            # Fallback: semantic/temporal/entity links from memory_links table
+            # These are secondary to entity links (via unit_entities) and causal links
+            # Weight is halved (0.5x) to prioritize primary link types
+            # Check both directions: seeds -> others AND others -> seeds
+            fallback_rows = await conn.fetch(
+                f"""
+                WITH outgoing AS (
+                    -- Links FROM seeds TO other facts
+                    SELECT mu.id, mu.text, mu.context, mu.event_date, mu.occurred_start,
+                           mu.occurred_end, mu.mentioned_at, mu.embedding,
+                           mu.fact_type, mu.document_id, mu.chunk_id, mu.tags,
+                           ml.weight
+                    FROM {fq_table("memory_links")} ml
+                    JOIN {fq_table("memory_units")} mu ON ml.to_unit_id = mu.id
+                    WHERE ml.from_unit_id = ANY($1::uuid[])
+                      AND ml.link_type IN ('semantic', 'temporal', 'entity')
+                      AND ml.weight >= $2
+                      AND mu.fact_type = $3
+                      AND mu.id != ALL($1::uuid[])
+                ),
+                incoming AS (
+                    -- Links FROM other facts TO seeds (reverse direction)
+                    SELECT mu.id, mu.text, mu.context, mu.event_date, mu.occurred_start,
+                           mu.occurred_end, mu.mentioned_at, mu.embedding,
+                           mu.fact_type, mu.document_id, mu.chunk_id, mu.tags,
+                           ml.weight
+                    FROM {fq_table("memory_links")} ml
+                    JOIN {fq_table("memory_units")} mu ON ml.from_unit_id = mu.id
+                    WHERE ml.to_unit_id = ANY($1::uuid[])
+                      AND ml.link_type IN ('semantic', 'temporal', 'entity')
+                      AND ml.weight >= $2
+                      AND mu.fact_type = $3
+                      AND mu.id != ALL($1::uuid[])
+                ),
+                combined AS (
+                    SELECT * FROM outgoing
+                    UNION ALL
+                    SELECT * FROM incoming
+                )
+                SELECT DISTINCT ON (id)
+                    id, text, context, event_date, occurred_start,
+                    occurred_end, mentioned_at, embedding,
+                    fact_type, document_id, chunk_id, tags,
+                    (MAX(weight) * 0.5) AS score
+                FROM combined
+                GROUP BY id, text, context, event_date, occurred_start,
+                         occurred_end, mentioned_at, embedding,
+                         fact_type, document_id, chunk_id, tags
+                ORDER BY id, score DESC
+                LIMIT $4
+                """,
+                seed_ids,
+                self.causal_weight_threshold,
+                fact_type,
+                budget,
+            )
+
             timings.edge_load_time = time.time() - query_start
-            timings.db_queries = 2
-            timings.edge_count = len(entity_rows) + len(causal_rows)
+            timings.db_queries = 3
+            timings.edge_count = len(entity_rows) + len(causal_rows) + len(fallback_rows)
 
         # Merge results, taking max score per fact
+        # Priority: entity links (unit_entities) > causal links > fallback links
         score_map: dict[str, float] = {}
         row_map: dict[str, dict] = {}
 
@@ -278,6 +355,12 @@ class LinkExpansionRetriever(GraphRetriever):
             row_map[fact_id] = dict(row)
 
         for row in causal_rows:
+            fact_id = str(row["id"])
+            score_map[fact_id] = max(score_map.get(fact_id, 0), row["score"])
+            if fact_id not in row_map:
+                row_map[fact_id] = dict(row)
+
+        for row in fallback_rows:
             fact_id = str(row["id"])
             score_map[fact_id] = max(score_map.get(fact_id, 0), row["score"])
             if fact_id not in row_map:
