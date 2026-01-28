@@ -648,6 +648,68 @@ ALWAYS include "user" when fact is about the user.
 Extract anything that could help link related facts together."""
 
 
+# Custom extraction prompt - injects user-provided guidelines
+CUSTOM_FACT_EXTRACTION_PROMPT = """Extract facts from text. Follow the custom guidelines below.
+
+LANGUAGE REQUIREMENT: Detect the language of the input text. All extracted facts, entity names, descriptions, and other output MUST be in the SAME language as the input. Do not translate to another language.
+
+{fact_types_instruction}
+
+══════════════════════════════════════════════════════════════════════════
+EXTRACTION GUIDELINES - CUSTOM
+══════════════════════════════════════════════════════════════════════════
+
+{custom_instructions}
+
+══════════════════════════════════════════════════════════════════════════
+FACT FORMAT - BE CONCISE
+══════════════════════════════════════════════════════════════════════════
+
+1. **what**: Core fact - concise but complete (1-2 sentences max)
+2. **when**: Temporal info if mentioned. "N/A" if none. Use day name when known.
+3. **where**: Location if relevant. "N/A" if none.
+4. **who**: People involved with relationships. "N/A" if just general info.
+5. **why**: Context/significance ONLY if important. "N/A" if obvious.
+
+CONCISENESS: Capture the essence, not every word. One good sentence beats three mediocre ones.
+
+══════════════════════════════════════════════════════════════════════════
+COREFERENCE RESOLUTION
+══════════════════════════════════════════════════════════════════════════
+
+Link generic references to names when both appear:
+- "my roommate" + "Emily" → use "Emily (user's roommate)"
+- "the manager" + "Sarah" → use "Sarah (the manager)"
+
+══════════════════════════════════════════════════════════════════════════
+CLASSIFICATION
+══════════════════════════════════════════════════════════════════════════
+
+fact_kind:
+- "event": Specific datable occurrence (set occurred_start/end)
+- "conversation": Ongoing state, preference, trait (no dates)
+
+fact_type:
+- "world": About user's life, other people, external events
+- "assistant": Interactions with assistant (requests, recommendations)
+
+══════════════════════════════════════════════════════════════════════════
+TEMPORAL HANDLING
+══════════════════════════════════════════════════════════════════════════
+
+Use "Event Date" from input as reference for relative dates.
+- "yesterday" relative to Event Date, not today
+- For events: set occurred_start AND occurred_end (same for point events)
+- For conversation facts: NO occurred dates
+
+══════════════════════════════════════════════════════════════════════════
+ENTITIES
+══════════════════════════════════════════════════════════════════════════
+
+Include: people names, organizations, places, key objects, abstract concepts (career, friendship, etc.)
+Always include "user" when fact is about the user."""
+
+
 # Causal relationships section - appended when causal extraction is enabled
 CAUSAL_RELATIONSHIPS_SECTION = """
 
@@ -680,6 +742,12 @@ async def _extract_facts_from_chunk(
     Note: event_date parameter is kept for backward compatibility but not used in prompt.
     The LLM extracts temporal information from the context string instead.
     """
+    import logging
+
+    from openai import BadRequestError
+
+    logger = logging.getLogger(__name__)
+
     memory_bank_context = f"\n- Your name: {agent_name}" if agent_name and extract_opinions else ""
 
     # Determine which fact types to extract based on the flag
@@ -698,13 +766,27 @@ async def _extract_facts_from_chunk(
     extract_causal_links = config.retain_extract_causal_links
 
     # Select base prompt based on extraction mode
-    if extraction_mode == "verbose":
+    if extraction_mode == "custom":
+        # Custom mode: inject user-provided guidelines
+        if not config.retain_custom_instructions:
+            logger.warning(
+                "extraction_mode='custom' but HINDSIGHT_API_RETAIN_CUSTOM_INSTRUCTIONS not set. "
+                "Falling back to 'concise' mode."
+            )
+            base_prompt = CONCISE_FACT_EXTRACTION_PROMPT
+            prompt = base_prompt.format(fact_types_instruction=fact_types_instruction)
+        else:
+            base_prompt = CUSTOM_FACT_EXTRACTION_PROMPT
+            prompt = base_prompt.format(
+                fact_types_instruction=fact_types_instruction,
+                custom_instructions=config.retain_custom_instructions,
+            )
+    elif extraction_mode == "verbose":
         base_prompt = VERBOSE_FACT_EXTRACTION_PROMPT
+        prompt = base_prompt.format(fact_types_instruction=fact_types_instruction)
     else:
         base_prompt = CONCISE_FACT_EXTRACTION_PROMPT
-
-    # Format the prompt with fact types instruction
-    prompt = base_prompt.format(fact_types_instruction=fact_types_instruction)
+        prompt = base_prompt.format(fact_types_instruction=fact_types_instruction)
 
     # Build the full prompt with or without causal relationships section
     # Select appropriate response schema based on extraction mode and causal links
@@ -716,12 +798,6 @@ async def _extract_facts_from_chunk(
             response_schema = FactExtractionResponse
     else:
         response_schema = FactExtractionResponseNoCausal
-
-    import logging
-
-    from openai import BadRequestError
-
-    logger = logging.getLogger(__name__)
 
     # Retry logic for JSON validation errors
     max_retries = 2
