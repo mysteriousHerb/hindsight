@@ -6,21 +6,20 @@ image: /img/reflect-operation.webp
 hide_table_of_contents: false
 ---
 
-Today we're releasing Hindsight 0.4.0, which introduces powerful capabilities for AI agent memory: **Observations** for automatic knowledge consolidation, **Mental Models** for user-curated summaries, and **Directives** for enforcing hard rules.
+Today we're releasing Hindsight 0.4.0, which introduces two powerful learning capabilities for AI agents: **Observations** for automatic knowledge consolidation, and **Mental Models** for user-curated summaries.
 
 <!-- truncate -->
 
-## Three Layers of Knowledge
+## Two Levels of Learning
 
-Hindsight 0.4.0 introduces a hierarchical knowledge system:
+Hindsight 0.4.0 introduces a hierarchical learning system:
 
-| Layer | What It Is | How It's Created | Purpose |
-|-------|------------|------------------|---------|
-| **Directives** | Hard rules that must be followed | Manually created via API | Compliance, guardrails, style |
-| **Mental Models** | User-curated summaries for common queries | Manually created via API | Consistent answers to key questions |
-| **Observations** | Consolidated knowledge from facts | Automatically after retain | Patterns learned from evidence |
+| Level | What It Is | How It's Created |
+|-------|------------|------------------|
+| **Mental Models** | User-curated summaries for common queries | Manually created via API |
+| **Observations** | Consolidated knowledge from facts | Automatically after retain |
 
-During `reflect`, the agent enforces directives as hard rules, checks mental models for curated knowledge, uses observations for consolidated insights, and falls back to raw facts for ground truth.
+During `reflect`, the agent checks these in priority order — mental models first (your curated knowledge), then observations (automatic synthesis), then raw facts.
 
 ---
 
