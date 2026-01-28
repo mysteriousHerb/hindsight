@@ -1,6 +1,6 @@
 ---
 slug: learning-capabilities
-title: "Introducing Learning Capabilities: Observations and Mental Models"
+title: "Agent memory that learns: observations and mental models"
 authors: [hindsight]
 image: /img/reflect-operation.webp
 hide_table_of_contents: false
@@ -262,8 +262,7 @@ These learning capabilities are the foundation for more sophisticated agent memo
 ---
 
 **Resources:**
-- [Recall API](/developer/api/recall) — retrieve observations alongside facts
-- [Reflect API](/developer/api/reflect) — responses now include supporting observations
-- [Mental Models API](/developer/api/mental-models) — create and manage curated summaries
-- [Observations Guide](/developer/observations) — deep dive into knowledge consolidation
-- [Full Changelog](/changelog)
+- [Recall API](../developer/api/recall) — retrieve observations alongside facts
+- [Reflect API](../developer/api/reflect) — responses now include supporting observations
+- [Mental Models](../developer/mental-models) — create and manage curated summaries, understand observations
+- [Full Changelog](../changelog)
