@@ -80,6 +80,18 @@ def _is_done_tool(name: str) -> bool:
 # Pattern to match done() call as text - handles done({...}) with nested JSON
 _DONE_CALL_PATTERN = re.compile(r"done\s*\(\s*\{.*$", re.DOTALL)
 
+# Patterns for leaked structured output in the answer field
+_LEAKED_JSON_SUFFIX = re.compile(
+    r'\s*```(?:json)?\s*\{[^}]*(?:"(?:observation_ids|memory_ids|mental_model_ids)"|\})\s*```\s*$',
+    re.DOTALL | re.IGNORECASE,
+)
+_LEAKED_JSON_OBJECT = re.compile(
+    r'\s*\{[^{]*"(?:observation_ids|memory_ids|mental_model_ids|answer)"[^}]*\}\s*$', re.DOTALL
+)
+_TRAILING_IDS_PATTERN = re.compile(
+    r"\s*(?:observation_ids|memory_ids|mental_model_ids)\s*[=:]\s*\[.*?\]\s*$", re.DOTALL | re.IGNORECASE
+)
+
 
 def _clean_answer_text(text: str) -> str:
     """Clean up answer text by removing any done() tool call syntax.
@@ -89,6 +101,33 @@ def _clean_answer_text(text: str) -> str:
     """
     # Remove done() call pattern from the end of the text
     cleaned = _DONE_CALL_PATTERN.sub("", text).strip()
+    return cleaned if cleaned else text
+
+
+def _clean_done_answer(text: str) -> str:
+    """Clean up the answer field from a done() tool call.
+
+    Some LLMs leak structured output patterns into the answer text, such as:
+    - JSON code blocks with observation_ids/memory_ids at the end
+    - Raw JSON objects with these fields
+    - Plain text like "observation_ids: [...]"
+
+    This cleans those patterns while preserving the actual answer content.
+    """
+    if not text:
+        return text
+
+    cleaned = text
+
+    # Remove leaked JSON in code blocks at the end
+    cleaned = _LEAKED_JSON_SUFFIX.sub("", cleaned).strip()
+
+    # Remove leaked raw JSON objects at the end
+    cleaned = _LEAKED_JSON_OBJECT.sub("", cleaned).strip()
+
+    # Remove trailing ID patterns
+    cleaned = _TRAILING_IDS_PATTERN.sub("", cleaned).strip()
+
     return cleaned if cleaned else text
 
 
@@ -722,7 +761,9 @@ async def _process_done_tool(
     """Process the done tool call and return the result."""
     args = done_call.arguments
 
-    answer = args.get("answer", "").strip()
+    # Extract and clean the answer - some LLMs leak structured output into the answer text
+    raw_answer = args.get("answer", "").strip()
+    answer = _clean_done_answer(raw_answer) if raw_answer else ""
     if not answer:
         answer = "No answer provided."
 
