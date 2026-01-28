@@ -20,6 +20,7 @@ from ..config import (
     DEFAULT_RERANKER_FLASHRANK_CACHE_DIR,
     DEFAULT_RERANKER_FLASHRANK_MODEL,
     DEFAULT_RERANKER_LITELLM_MODEL,
+    DEFAULT_RERANKER_LOCAL_FORCE_CPU,
     DEFAULT_RERANKER_LOCAL_MAX_CONCURRENT,
     DEFAULT_RERANKER_LOCAL_MODEL,
     DEFAULT_RERANKER_PROVIDER,
@@ -33,6 +34,7 @@ from ..config import (
     ENV_RERANKER_FLASHRANK_CACHE_DIR,
     ENV_RERANKER_FLASHRANK_MODEL,
     ENV_RERANKER_LITELLM_MODEL,
+    ENV_RERANKER_LOCAL_FORCE_CPU,
     ENV_RERANKER_LOCAL_MAX_CONCURRENT,
     ENV_RERANKER_LOCAL_MODEL,
     ENV_RERANKER_PROVIDER,
@@ -99,7 +101,7 @@ class LocalSTCrossEncoder(CrossEncoderModel):
     _executor: ThreadPoolExecutor | None = None
     _max_concurrent: int = 4  # Limit concurrent CPU-bound reranking calls
 
-    def __init__(self, model_name: str | None = None, max_concurrent: int = 4):
+    def __init__(self, model_name: str | None = None, max_concurrent: int = 4, force_cpu: bool = False):
         """
         Initialize local SentenceTransformers cross-encoder.
 
@@ -108,8 +110,11 @@ class LocalSTCrossEncoder(CrossEncoderModel):
                        Default: cross-encoder/ms-marco-MiniLM-L-6-v2
             max_concurrent: Maximum concurrent reranking calls (default: 2).
                            Higher values may cause CPU thrashing under load.
+            force_cpu: Force CPU mode (avoids MPS/XPC issues on macOS in daemon mode).
+                      Default: False
         """
         self.model_name = model_name or DEFAULT_RERANKER_LOCAL_MODEL
+        self.force_cpu = force_cpu
         self._model = None
         LocalSTCrossEncoder._max_concurrent = max_concurrent
 
@@ -137,16 +142,12 @@ class LocalSTCrossEncoder(CrossEncoderModel):
         # which can cause issues when accelerate is installed but no GPU is available.
         # Note: We do NOT use device_map because CrossEncoder internally calls .to(device)
         # after loading, which conflicts with accelerate's device_map handling.
-        import os
-
         import torch
 
-        # Force CPU mode if HINDSIGHT_FORCE_CPU is set (used in daemon mode to avoid MPS/XPC issues)
-        force_cpu = os.getenv("HINDSIGHT_FORCE_CPU", "0") == "1"
-
-        if force_cpu:
+        # Force CPU mode if configured (used in daemon mode to avoid MPS/XPC issues on macOS)
+        if self.force_cpu:
             device = "cpu"
-            logger.info("Reranker: forcing CPU mode (HINDSIGHT_FORCE_CPU=1)")
+            logger.info("Reranker: forcing CPU mode (HINDSIGHT_API_RERANKER_LOCAL_FORCE_CPU=1)")
         else:
             # Check for GPU (CUDA) or Apple Silicon (MPS)
             has_gpu = torch.cuda.is_available() or (
@@ -222,11 +223,7 @@ class LocalSTCrossEncoder(CrossEncoderModel):
             )
 
         # Determine device based on hardware availability
-        import os
-
-        force_cpu = os.getenv("HINDSIGHT_FORCE_CPU", "0") == "1"
-
-        if force_cpu:
+        if self.force_cpu:
             device = "cpu"
         else:
             has_gpu = torch.cuda.is_available() or (
@@ -915,7 +912,11 @@ def create_cross_encoder_from_env() -> CrossEncoderModel:
         max_concurrent = int(
             os.environ.get(ENV_RERANKER_LOCAL_MAX_CONCURRENT, str(DEFAULT_RERANKER_LOCAL_MAX_CONCURRENT))
         )
-        return LocalSTCrossEncoder(model_name=model_name, max_concurrent=max_concurrent)
+        force_cpu = os.getenv(ENV_RERANKER_LOCAL_FORCE_CPU, str(DEFAULT_RERANKER_LOCAL_FORCE_CPU)).lower() in (
+            "true",
+            "1",
+        )
+        return LocalSTCrossEncoder(model_name=model_name, max_concurrent=max_concurrent, force_cpu=force_cpu)
     elif provider == "cohere":
         api_key = os.environ.get(ENV_COHERE_API_KEY)
         if not api_key:

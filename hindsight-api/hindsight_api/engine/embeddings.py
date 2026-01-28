@@ -18,6 +18,7 @@ import httpx
 from ..config import (
     DEFAULT_EMBEDDINGS_COHERE_MODEL,
     DEFAULT_EMBEDDINGS_LITELLM_MODEL,
+    DEFAULT_EMBEDDINGS_LOCAL_FORCE_CPU,
     DEFAULT_EMBEDDINGS_LOCAL_MODEL,
     DEFAULT_EMBEDDINGS_OPENAI_MODEL,
     DEFAULT_EMBEDDINGS_PROVIDER,
@@ -26,6 +27,7 @@ from ..config import (
     ENV_EMBEDDINGS_COHERE_BASE_URL,
     ENV_EMBEDDINGS_COHERE_MODEL,
     ENV_EMBEDDINGS_LITELLM_MODEL,
+    ENV_EMBEDDINGS_LOCAL_FORCE_CPU,
     ENV_EMBEDDINGS_LOCAL_MODEL,
     ENV_EMBEDDINGS_OPENAI_API_KEY,
     ENV_EMBEDDINGS_OPENAI_BASE_URL,
@@ -92,15 +94,18 @@ class LocalSTEmbeddings(Embeddings):
     The embedding dimension is auto-detected from the model.
     """
 
-    def __init__(self, model_name: str | None = None):
+    def __init__(self, model_name: str | None = None, force_cpu: bool = False):
         """
         Initialize local SentenceTransformers embeddings.
 
         Args:
             model_name: Name of the SentenceTransformer model to use.
                        Default: BAAI/bge-small-en-v1.5
+            force_cpu: Force CPU mode (avoids MPS/XPC issues on macOS in daemon mode).
+                      Default: False
         """
         self.model_name = model_name or DEFAULT_EMBEDDINGS_LOCAL_MODEL
+        self.force_cpu = force_cpu
         self._model = None
         self._dimension: int | None = None
 
@@ -132,16 +137,12 @@ class LocalSTEmbeddings(Embeddings):
         # Determine device based on hardware availability.
         # We always set low_cpu_mem_usage=False to prevent lazy loading (meta tensors)
         # which can cause issues when accelerate is installed but no GPU is available.
-        import os
-
         import torch
 
-        # Force CPU mode if HINDSIGHT_FORCE_CPU is set (used in daemon mode to avoid MPS/XPC issues)
-        force_cpu = os.getenv("HINDSIGHT_FORCE_CPU", "0") == "1"
-
-        if force_cpu:
+        # Force CPU mode if configured (used in daemon mode to avoid MPS/XPC issues on macOS)
+        if self.force_cpu:
             device = "cpu"
-            logger.info("Embeddings: forcing CPU mode (HINDSIGHT_FORCE_CPU=1)")
+            logger.info("Embeddings: forcing CPU mode")
         else:
             # Check for GPU (CUDA) or Apple Silicon (MPS)
             has_gpu = torch.cuda.is_available() or (
@@ -210,11 +211,7 @@ class LocalSTEmbeddings(Embeddings):
             )
 
         # Determine device based on hardware availability
-        import os
-
-        force_cpu = os.getenv("HINDSIGHT_FORCE_CPU", "0") == "1"
-
-        if force_cpu:
+        if self.force_cpu:
             device = "cpu"
         else:
             has_gpu = torch.cuda.is_available() or (
@@ -807,7 +804,11 @@ def create_embeddings_from_env() -> Embeddings:
     elif provider == "local":
         model = os.environ.get(ENV_EMBEDDINGS_LOCAL_MODEL)
         model_name = model or DEFAULT_EMBEDDINGS_LOCAL_MODEL
-        return LocalSTEmbeddings(model_name=model_name)
+        force_cpu = os.getenv(ENV_EMBEDDINGS_LOCAL_FORCE_CPU, str(DEFAULT_EMBEDDINGS_LOCAL_FORCE_CPU)).lower() in (
+            "true",
+            "1",
+        )
+        return LocalSTEmbeddings(model_name=model_name, force_cpu=force_cpu)
     elif provider == "openai":
         # Use dedicated embeddings API key, or fall back to LLM API key
         api_key = os.environ.get(ENV_EMBEDDINGS_OPENAI_API_KEY) or os.environ.get(ENV_LLM_API_KEY)
