@@ -311,6 +311,7 @@ class HindsightConfig:
     reranker_provider: str
     reranker_local_model: str
     reranker_local_force_cpu: bool
+    reranker_local_max_concurrent: int
     reranker_tei_url: str | None
     reranker_tei_batch_size: int
     reranker_tei_max_concurrent: int
@@ -410,6 +411,9 @@ class HindsightConfig:
                 ENV_RERANKER_LOCAL_FORCE_CPU, str(DEFAULT_RERANKER_LOCAL_FORCE_CPU)
             ).lower()
             in ("true", "1"),
+            reranker_local_max_concurrent=int(
+                os.getenv(ENV_RERANKER_LOCAL_MAX_CONCURRENT, str(DEFAULT_RERANKER_LOCAL_MAX_CONCURRENT))
+            ),
             reranker_tei_url=os.getenv(ENV_RERANKER_TEI_URL),
             reranker_tei_batch_size=int(os.getenv(ENV_RERANKER_TEI_BATCH_SIZE, str(DEFAULT_RERANKER_TEI_BATCH_SIZE))),
             reranker_tei_max_concurrent=int(

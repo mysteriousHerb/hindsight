@@ -917,13 +917,9 @@ def create_cross_encoder_from_env() -> CrossEncoderModel:
             max_concurrent=config.reranker_tei_max_concurrent,
         )
     elif provider == "local":
-        # Note: max_concurrent is not in config, read from env directly
-        max_concurrent = int(
-            os.environ.get(ENV_RERANKER_LOCAL_MAX_CONCURRENT, str(DEFAULT_RERANKER_LOCAL_MAX_CONCURRENT))
-        )
         return LocalSTCrossEncoder(
             model_name=config.reranker_local_model,
-            max_concurrent=max_concurrent,
+            max_concurrent=config.reranker_local_max_concurrent,
             force_cpu=config.reranker_local_force_cpu,
         )
     elif provider == "cohere":

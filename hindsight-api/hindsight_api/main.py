@@ -204,6 +204,7 @@ def main():
             reranker_provider=config.reranker_provider,
             reranker_local_model=config.reranker_local_model,
             reranker_local_force_cpu=config.reranker_local_force_cpu,
+            reranker_local_max_concurrent=config.reranker_local_max_concurrent,
             reranker_tei_url=config.reranker_tei_url,
             reranker_tei_batch_size=config.reranker_tei_batch_size,
             reranker_tei_max_concurrent=config.reranker_tei_max_concurrent,
