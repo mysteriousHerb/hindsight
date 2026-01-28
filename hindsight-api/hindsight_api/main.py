@@ -140,6 +140,12 @@ def main():
         args.port = DEFAULT_DAEMON_PORT
         args.host = "127.0.0.1"  # Only bind to localhost for security
 
+        # Force CPU mode for daemon to avoid macOS MPS/XPC issues
+        # MPS (Metal Performance Shaders) has unstable XPC connections in background processes
+        # that can cause assertion failures and process crashes at the C++ level
+        # (which Python exception handlers cannot catch)
+        os.environ["HINDSIGHT_FORCE_CPU"] = "1"
+
         # Check if another daemon is already running
         daemon_lock = DaemonLock()
         if not daemon_lock.acquire():

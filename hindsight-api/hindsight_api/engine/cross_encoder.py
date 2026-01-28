@@ -137,15 +137,26 @@ class LocalSTCrossEncoder(CrossEncoderModel):
         # which can cause issues when accelerate is installed but no GPU is available.
         # Note: We do NOT use device_map because CrossEncoder internally calls .to(device)
         # after loading, which conflicts with accelerate's device_map handling.
+        import os
+
         import torch
 
-        # Check for GPU (CUDA) or Apple Silicon (MPS)
-        has_gpu = torch.cuda.is_available() or (hasattr(torch.backends, "mps") and torch.backends.mps.is_available())
+        # Force CPU mode if HINDSIGHT_FORCE_CPU is set (used in daemon mode to avoid MPS/XPC issues)
+        force_cpu = os.getenv("HINDSIGHT_FORCE_CPU", "0") == "1"
 
-        if has_gpu:
-            device = None  # Let sentence-transformers auto-detect GPU/MPS
-        else:
+        if force_cpu:
             device = "cpu"
+            logger.info("Reranker: forcing CPU mode (HINDSIGHT_FORCE_CPU=1)")
+        else:
+            # Check for GPU (CUDA) or Apple Silicon (MPS)
+            has_gpu = torch.cuda.is_available() or (
+                hasattr(torch.backends, "mps") and torch.backends.mps.is_available()
+            )
+
+            if has_gpu:
+                device = None  # Let sentence-transformers auto-detect GPU/MPS
+            else:
+                device = "cpu"
 
         self._model = CrossEncoder(
             self.model_name,
@@ -211,12 +222,21 @@ class LocalSTCrossEncoder(CrossEncoderModel):
             )
 
         # Determine device based on hardware availability
-        has_gpu = torch.cuda.is_available() or (hasattr(torch.backends, "mps") and torch.backends.mps.is_available())
+        import os
 
-        if has_gpu:
-            device = None  # Let sentence-transformers auto-detect GPU/MPS
-        else:
+        force_cpu = os.getenv("HINDSIGHT_FORCE_CPU", "0") == "1"
+
+        if force_cpu:
             device = "cpu"
+        else:
+            has_gpu = torch.cuda.is_available() or (
+                hasattr(torch.backends, "mps") and torch.backends.mps.is_available()
+            )
+
+            if has_gpu:
+                device = None  # Let sentence-transformers auto-detect GPU/MPS
+            else:
+                device = "cpu"
 
         self._model = CrossEncoder(
             self.model_name,
