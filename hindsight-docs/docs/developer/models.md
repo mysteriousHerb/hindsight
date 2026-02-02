@@ -47,6 +47,46 @@ The following models have been tested and verified to work correctly with Hindsi
 | **Groq** | `openai/gpt-oss-120b` |
 | **Groq** | `openai/gpt-oss-20b` |
 
+### Provider Default Models
+
+Each provider has a recommended default model that's used when `HINDSIGHT_API_LLM_MODEL` is not explicitly set. This makes configuration simpler - just specify the provider and get a sensible default:
+
+| Provider | Default Model |
+|----------|--------------|
+| `openai` | `gpt-5-mini` |
+| `anthropic` | `claude-sonnet-4-20250514` |
+| `gemini` | `gemini-2.5-flash` |
+| `groq` | `openai/gpt-oss-120b` |
+| `ollama` | `gemma3:12b` |
+| `lmstudio` | `local-model` |
+| `vertexai` | `gemini-2.0-flash-001` |
+| `openai-codex` | `o3-mini` |
+| `claude-code` | `claude-sonnet-4-20250514` |
+
+**Example:** Setting just the provider uses its default model:
+```bash
+# Uses claude-sonnet-4-20250514 automatically
+export HINDSIGHT_API_LLM_PROVIDER=anthropic
+export HINDSIGHT_API_LLM_API_KEY=sk-ant-xxxxxxxxxxxx
+```
+
+You can override the default by explicitly setting `HINDSIGHT_API_LLM_MODEL`:
+```bash
+# Override to use Opus instead
+export HINDSIGHT_API_LLM_PROVIDER=anthropic
+export HINDSIGHT_API_LLM_API_KEY=sk-ant-xxxxxxxxxxxx
+export HINDSIGHT_API_LLM_MODEL=claude-opus-4-5-20251101
+```
+
+This also applies to per-operation overrides:
+```bash
+# Global: OpenAI gpt-5-mini (default)
+export HINDSIGHT_API_LLM_PROVIDER=openai
+
+# Retain: Anthropic claude-sonnet-4-20250514 (default)
+export HINDSIGHT_API_RETAIN_LLM_PROVIDER=anthropic
+```
+
 ### Using Other Models
 
 Other LLM models not listed above may work with Hindsight, but they must support **at least 65,000 output tokens** to ensure reliable fact extraction. If you need support for a specific model that doesn't meet this requirement, please [open an issue](https://github.com/hindsight-ai/hindsight/issues) to request an exception.
