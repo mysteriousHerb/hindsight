@@ -167,9 +167,7 @@ def _do_configure_from_env():
         or os.environ.get("OPENAI_API_KEY")
     )
     provider = (
-        os.environ.get("HINDSIGHT_API_LLM_PROVIDER")
-        or os.environ.get("HINDSIGHT_EMBED_LLM_PROVIDER")
-        or "openai"
+        os.environ.get("HINDSIGHT_API_LLM_PROVIDER") or os.environ.get("HINDSIGHT_EMBED_LLM_PROVIDER") or "openai"
     )
 
     if provider not in PROVIDER_DEFAULTS:
@@ -190,11 +188,7 @@ def _do_configure_from_env():
         print(f"  HINDSIGHT_API_LLM_MODEL=<model>  # optional, default: {default_model}", file=sys.stderr)
         return 1
 
-    model = (
-        os.environ.get("HINDSIGHT_API_LLM_MODEL")
-        or os.environ.get("HINDSIGHT_EMBED_LLM_MODEL")
-        or default_model
-    )
+    model = os.environ.get("HINDSIGHT_API_LLM_MODEL") or os.environ.get("HINDSIGHT_EMBED_LLM_MODEL") or default_model
     bank_id = os.environ.get("HINDSIGHT_EMBED_BANK_ID", "default")
 
     print()
