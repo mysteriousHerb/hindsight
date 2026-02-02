@@ -939,32 +939,34 @@ class MemoryEngine(MemoryEngineInterface):
 
             if not self.db_url:
                 raise ValueError("Database URL is required for migrations")
-            logger.info("Running database migrations...")
-            # Use configured database schema for migrations (defaults to "public")
-            run_migrations(self.db_url, schema=get_config().database_schema)
 
-            # Migrate all tenant schemas
-            # Skip the default schema since we already migrated it above
-            default_schema = get_config().database_schema
+            # Migrate all schemas from the tenant extension
+            # The tenant extension is the single source of truth for which schemas exist
+            logger.info("Running database migrations...")
             try:
                 tenants = await self._tenant_extension.list_tenants()
                 if tenants:
-                    logger.info(f"Running migrations on {len(tenants)} tenant schemas...")
+                    logger.info(f"Running migrations on {len(tenants)} schema(s)...")
                     for tenant in tenants:
                         schema = tenant.schema
-                        # Skip if it's the default schema (already migrated above)
-                        if schema and schema != default_schema:
+                        if schema:
                             try:
                                 run_migrations(self.db_url, schema=schema)
                             except Exception as e:
-                                logger.warning(f"Failed to migrate tenant schema {schema}: {e}")
-                    logger.info("Tenant schema migrations completed")
-            except Exception as e:
-                logger.warning(f"Failed to run tenant schema migrations: {e}")
+                                logger.warning(f"Failed to migrate schema {schema}: {e}")
+                    logger.info("Schema migrations completed")
 
-            # Ensure embedding column dimension matches the model's dimension
-            # This is done after migrations and after embeddings.initialize()
-            ensure_embedding_dimension(self.db_url, self.embeddings.dimension, schema=get_config().database_schema)
+                    # Ensure embedding column dimension matches the model's dimension
+                    # This is done after migrations and after embeddings.initialize()
+                    for tenant in tenants:
+                        schema = tenant.schema
+                        if schema:
+                            try:
+                                ensure_embedding_dimension(self.db_url, self.embeddings.dimension, schema=schema)
+                            except Exception as e:
+                                logger.warning(f"Failed to ensure embedding dimension for schema {schema}: {e}")
+            except Exception as e:
+                logger.warning(f"Failed to run schema migrations: {e}")
 
         logger.info(f"Connecting to PostgreSQL at {self.db_url}")
 
