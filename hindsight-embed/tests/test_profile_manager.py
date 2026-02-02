@@ -262,9 +262,11 @@ class TestProfileManager:
 
     def test_daemon_running_status(self, profile_manager):
         """Test that daemon running status is checked correctly."""
-        with patch("requests.get") as mock_get:
+        with patch("httpx.Client") as mock_client:
             # Mock successful health check
-            mock_get.return_value.status_code = 200
+            mock_response = Mock()
+            mock_response.status_code = 200
+            mock_client.return_value.__enter__.return_value.get.return_value = mock_response
 
             profile_manager.create_profile("test", {"KEY": "value"})
             profiles = profile_manager.list_profiles()

@@ -14,7 +14,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
-import requests
+import httpx
 
 # Configuration paths
 CONFIG_DIR = Path.home() / ".hindsight"
@@ -330,8 +330,9 @@ class ProfileManager:
             True if daemon is responding.
         """
         try:
-            response = requests.get(f"http://127.0.0.1:{port}/health", timeout=1)
-            return response.status_code == 200
+            with httpx.Client() as client:
+                response = client.get(f"http://127.0.0.1:{port}/health", timeout=1)
+                return response.status_code == 200
         except Exception:
             return False
 
