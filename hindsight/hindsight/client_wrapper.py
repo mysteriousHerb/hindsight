@@ -45,6 +45,12 @@ class BanksAPI:
         """Set or update the disposition for a bank."""
         return self._client.set_disposition(bank_id=bank_id, disposition=disposition)
 
+    def list(self):
+        """List all banks."""
+        from hindsight_client.hindsight_client import _run_async
+
+        return _run_async(self._client._banks_api.list_banks())
+
 
 class MentalModelsAPI:
     """Namespace for mental model operations."""
