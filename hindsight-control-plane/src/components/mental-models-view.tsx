@@ -266,7 +266,9 @@ export function MentalModelsView() {
                         <CardContent className="p-4">
                           <div className="flex items-start justify-between mb-3">
                             <div className="flex-1 min-w-0">
-                              <h3 className="font-semibold text-foreground mb-1 truncate">{m.name}</h3>
+                              <h3 className="font-semibold text-foreground mb-1 truncate">
+                                {m.name}
+                              </h3>
                               <div className="flex items-center gap-2">
                                 <code className="text-xs font-mono text-muted-foreground truncate">
                                   {m.id}
@@ -278,7 +280,9 @@ export function MentalModelsView() {
                                       : "bg-slate-500/10 text-slate-600 dark:text-slate-400"
                                   }`}
                                 >
-                                  {m.trigger?.refresh_after_consolidation ? "Auto Refresh" : "Manual"}
+                                  {m.trigger?.refresh_after_consolidation
+                                    ? "Auto Refresh"
+                                    : "Manual"}
                                 </span>
                               </div>
                             </div>
@@ -335,73 +339,73 @@ export function MentalModelsView() {
               {viewMode === "table" && (
                 <div className="border rounded-lg overflow-hidden">
                   <Table className="table-fixed">
-                  <TableHeader>
-                    <TableRow className="bg-muted/50">
-                      <TableHead className="w-[20%]">ID</TableHead>
-                      <TableHead className="w-[20%]">Name</TableHead>
-                      <TableHead className="w-[35%]">Source Query</TableHead>
-                      <TableHead className="w-[15%]">Last Refreshed</TableHead>
-                      <TableHead className="w-[10%]"></TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {paginatedMentalModels.map((m) => {
-                      const refreshedDate = new Date(m.last_refreshed_at);
-                      const dateDisplay = refreshedDate.toLocaleDateString("en-US", {
-                        month: "short",
-                        day: "numeric",
-                        year: "numeric",
-                      });
-                      const timeDisplay = refreshedDate.toLocaleTimeString("en-US", {
-                        hour: "2-digit",
-                        minute: "2-digit",
-                        hour12: false,
-                      });
+                    <TableHeader>
+                      <TableRow className="bg-muted/50">
+                        <TableHead className="w-[20%]">ID</TableHead>
+                        <TableHead className="w-[20%]">Name</TableHead>
+                        <TableHead className="w-[35%]">Source Query</TableHead>
+                        <TableHead className="w-[15%]">Last Refreshed</TableHead>
+                        <TableHead className="w-[10%]"></TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {paginatedMentalModels.map((m) => {
+                        const refreshedDate = new Date(m.last_refreshed_at);
+                        const dateDisplay = refreshedDate.toLocaleDateString("en-US", {
+                          month: "short",
+                          day: "numeric",
+                          year: "numeric",
+                        });
+                        const timeDisplay = refreshedDate.toLocaleTimeString("en-US", {
+                          hour: "2-digit",
+                          minute: "2-digit",
+                          hour12: false,
+                        });
 
-                      return (
-                        <TableRow
-                          key={m.id}
-                          className={`cursor-pointer hover:bg-muted/50 ${
-                            selectedMentalModel?.id === m.id ? "bg-primary/10" : ""
-                          }`}
-                          onClick={() => setSelectedMentalModel(m)}
-                        >
-                          <TableCell className="py-2">
-                            <code className="text-xs font-mono text-muted-foreground truncate block">
-                              {m.id}
-                            </code>
-                          </TableCell>
-                          <TableCell className="py-2">
-                            <div className="font-medium text-foreground">{m.name}</div>
-                          </TableCell>
-                          <TableCell className="py-2">
-                            <div className="text-sm text-muted-foreground truncate">
-                              {m.source_query}
-                            </div>
-                          </TableCell>
-                          <TableCell className="py-2 text-sm text-foreground">
-                            <div>{dateDisplay}</div>
-                            <div className="text-xs text-muted-foreground">{timeDisplay}</div>
-                          </TableCell>
-                          <TableCell className="py-2">
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              className="h-8 w-8 p-0 text-muted-foreground hover:text-destructive"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setDeleteTarget({ id: m.id, name: m.name });
-                              }}
-                            >
-                              <Trash2 className="h-4 w-4" />
-                            </Button>
-                          </TableCell>
-                        </TableRow>
-                      );
-                    })}
-                  </TableBody>
-                </Table>
-              </div>
+                        return (
+                          <TableRow
+                            key={m.id}
+                            className={`cursor-pointer hover:bg-muted/50 ${
+                              selectedMentalModel?.id === m.id ? "bg-primary/10" : ""
+                            }`}
+                            onClick={() => setSelectedMentalModel(m)}
+                          >
+                            <TableCell className="py-2">
+                              <code className="text-xs font-mono text-muted-foreground truncate block">
+                                {m.id}
+                              </code>
+                            </TableCell>
+                            <TableCell className="py-2">
+                              <div className="font-medium text-foreground">{m.name}</div>
+                            </TableCell>
+                            <TableCell className="py-2">
+                              <div className="text-sm text-muted-foreground truncate">
+                                {m.source_query}
+                              </div>
+                            </TableCell>
+                            <TableCell className="py-2 text-sm text-foreground">
+                              <div>{dateDisplay}</div>
+                              <div className="text-xs text-muted-foreground">{timeDisplay}</div>
+                            </TableCell>
+                            <TableCell className="py-2">
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-8 w-8 p-0 text-muted-foreground hover:text-destructive"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setDeleteTarget({ id: m.id, name: m.name });
+                                }}
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            </TableCell>
+                          </TableRow>
+                        );
+                      })}
+                    </TableBody>
+                  </Table>
+                </div>
               )}
 
               {/* Pagination Controls */}
@@ -584,7 +588,14 @@ function CreateMentalModelDialog({
         trigger: { refresh_after_consolidation: form.autoRefresh },
       });
 
-      setForm({ id: "", name: "", sourceQuery: "", maxTokens: "2048", tags: "", autoRefresh: false });
+      setForm({
+        id: "",
+        name: "",
+        sourceQuery: "",
+        maxTokens: "2048",
+        tags: "",
+        autoRefresh: false,
+      });
       onCreated();
     } catch (error) {
       console.error("Error creating mental model:", error);
@@ -599,7 +610,14 @@ function CreateMentalModelDialog({
       open={open}
       onOpenChange={(o) => {
         if (!o) {
-          setForm({ id: "", name: "", sourceQuery: "", maxTokens: "2048", tags: "", autoRefresh: false });
+          setForm({
+            id: "",
+            name: "",
+            sourceQuery: "",
+            maxTokens: "2048",
+            tags: "",
+            autoRefresh: false,
+          });
           onClose();
         }
       }}
@@ -674,9 +692,7 @@ function CreateMentalModelDialog({
             <Checkbox
               id="auto-refresh"
               checked={form.autoRefresh}
-              onCheckedChange={(checked) =>
-                setForm({ ...form, autoRefresh: checked === true })
-              }
+              onCheckedChange={(checked) => setForm({ ...form, autoRefresh: checked === true })}
             />
             <label
               htmlFor="auto-refresh"
@@ -791,9 +807,7 @@ function UpdateMentalModelDialog({
           <div className="space-y-2">
             <label className="text-sm font-medium text-muted-foreground">ID</label>
             <Input value={mentalModel.id} disabled className="bg-muted" />
-            <p className="text-xs text-muted-foreground">
-              ID cannot be changed after creation.
-            </p>
+            <p className="text-xs text-muted-foreground">ID cannot be changed after creation.</p>
           </div>
           <div className="space-y-2">
             <label className="text-sm font-medium text-foreground">Name *</label>
@@ -842,9 +856,7 @@ function UpdateMentalModelDialog({
             <Checkbox
               id="update-auto-refresh"
               checked={form.autoRefresh}
-              onCheckedChange={(checked) =>
-                setForm({ ...form, autoRefresh: checked === true })
-              }
+              onCheckedChange={(checked) => setForm({ ...form, autoRefresh: checked === true })}
             />
             <label
               htmlFor="update-auto-refresh"
@@ -976,12 +988,7 @@ function MentalModelDetailPanel({
           <div className="flex-1 mr-4">
             <div className="flex items-center gap-2">
               <h3 className="text-xl font-bold text-foreground">{mentalModel.name}</h3>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={onEdit}
-                className="h-7 w-7 p-0"
-              >
+              <Button variant="ghost" size="sm" onClick={onEdit} className="h-7 w-7 p-0">
                 <Pencil className="h-3.5 w-3.5" />
               </Button>
             </div>
@@ -1020,11 +1027,15 @@ function MentalModelDetailPanel({
               <div className="text-sm text-foreground">{mentalModel.name}</div>
             </div>
             <div>
-              <div className="text-xs font-bold text-muted-foreground uppercase mb-2">Source Query</div>
+              <div className="text-xs font-bold text-muted-foreground uppercase mb-2">
+                Source Query
+              </div>
               <div className="text-sm text-foreground">{mentalModel.source_query}</div>
             </div>
             <div>
-              <div className="text-xs font-bold text-muted-foreground uppercase mb-2">Max Tokens</div>
+              <div className="text-xs font-bold text-muted-foreground uppercase mb-2">
+                Max Tokens
+              </div>
               <div className="text-sm text-foreground">{mentalModel.max_tokens}</div>
             </div>
             {mentalModel.tags.length > 0 && (
@@ -1043,7 +1054,9 @@ function MentalModelDetailPanel({
               </div>
             )}
             <div>
-              <div className="text-xs font-bold text-muted-foreground uppercase mb-2">Auto-refresh</div>
+              <div className="text-xs font-bold text-muted-foreground uppercase mb-2">
+                Auto-refresh
+              </div>
               <span
                 className={`inline-block text-xs px-2 py-1 rounded-full font-medium ${
                   mentalModel.trigger?.refresh_after_consolidation
@@ -1056,13 +1069,19 @@ function MentalModelDetailPanel({
             </div>
             {mentalModel.last_refreshed_at && (
               <div>
-                <div className="text-xs font-bold text-muted-foreground uppercase mb-2">Last Refreshed</div>
-                <div className="text-sm text-foreground">{formatDateTime(mentalModel.last_refreshed_at)}</div>
+                <div className="text-xs font-bold text-muted-foreground uppercase mb-2">
+                  Last Refreshed
+                </div>
+                <div className="text-sm text-foreground">
+                  {formatDateTime(mentalModel.last_refreshed_at)}
+                </div>
               </div>
             )}
             <div>
               <div className="text-xs font-bold text-muted-foreground uppercase mb-2">Created</div>
-              <div className="text-sm text-foreground">{formatDateTime(mentalModel.created_at)}</div>
+              <div className="text-sm text-foreground">
+                {formatDateTime(mentalModel.created_at)}
+              </div>
             </div>
           </div>
 

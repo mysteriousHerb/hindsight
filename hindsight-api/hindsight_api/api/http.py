@@ -1144,7 +1144,9 @@ class CreateMentalModelRequest(BaseModel):
         }
     )
 
-    id: str | None = Field(None, description="Optional custom ID for the mental model (alphanumeric lowercase with hyphens)")
+    id: str | None = Field(
+        None, description="Optional custom ID for the mental model (alphanumeric lowercase with hyphens)"
+    )
     name: str = Field(description="Human-readable name for the mental model")
     source_query: str = Field(description="The query to run to generate content")
     tags: list[str] = Field(default_factory=list, description="Tags for scoped visibility")
