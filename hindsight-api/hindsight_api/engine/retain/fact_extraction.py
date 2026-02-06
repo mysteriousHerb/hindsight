@@ -646,6 +646,7 @@ For EVENTS (fact_kind="event") - MUST SET BOTH occurred_start AND occurred_end:
 - Convert relative dates → absolute using Event Date as reference
 - If Event Date is "Saturday, March 15, 2020", then "yesterday" = Friday, March 14, 2020
 - Dates mentioned in text (e.g., "in March 2020") should use THAT year, not current year
+- CRITICAL: If the content mentions an absolute date (e.g., "March 15, 2024", "2024-03-15"), you MUST extract it and set occurred_start in ISO format
 - Always include the day name (Monday, Tuesday, etc.) in the 'when' field
 - Set occurred_start AND occurred_end to WHEN IT HAPPENED (not when mentioned)
 - For single-day/point events: set occurred_end = occurred_start (same timestamp)
