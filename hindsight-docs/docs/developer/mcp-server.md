@@ -27,11 +27,12 @@ export HINDSIGHT_API_MCP_ENABLED=false
 
 ## Authentication
 
-By default, the MCP endpoint is **open** for local development.
+By default, the MCP endpoint is **open** (no authentication required).
 
-To enable authentication, set an API key:
+To enable authentication, configure the API key tenant extension:
 
 ```bash
+export HINDSIGHT_API_TENANT_EXTENSION=hindsight_api.extensions.builtin.tenant:ApiKeyTenantExtension
 export HINDSIGHT_API_TENANT_API_KEY=your-secret-key
 ```
 

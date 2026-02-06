@@ -94,7 +94,7 @@ class MCPMiddleware:
         1. If HINDSIGHT_API_MCP_AUTH_TOKEN is set (legacy), validates against that token
         2. Otherwise, uses TenantExtension.authenticate_mcp() from the MemoryEngine
            - DefaultTenantExtension: no auth required (local dev)
-           - ApiKeyTenantExtension: validates against env var (can disable MCP auth)
+           - ApiKeyTenantExtension: validates against env var
 
     Bank ID can be provided via:
     1. X-Bank-Id header (recommended for Claude Code)
