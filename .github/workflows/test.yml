@@ -283,10 +283,28 @@ jobs:
         include:
           - target: api-only
             name: api
+            variant: full
+            build_args: ""
+          - target: api-only
+            name: api-slim
+            variant: slim
+            build_args: |
+              INCLUDE_LOCAL_MODELS=false
+              PRELOAD_ML_MODELS=false
           - target: cp-only
             name: control-plane
+            variant: full
+            build_args: ""
           - target: standalone
             name: standalone
+            variant: full
+            build_args: ""
+          - target: standalone
+            name: standalone-slim
+            variant: slim
+            build_args: |
+              INCLUDE_LOCAL_MODELS=false
+              PRELOAD_ML_MODELS=false
 
     steps:
     - uses: actions/checkout@v4
@@ -305,14 +323,17 @@ jobs:
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v3
 
-    - name: Build ${{ matrix.name }} image
+    - name: Build ${{ matrix.name }} image (${{ matrix.variant }})
       uses: docker/build-push-action@v6
       with:
         context: .
         file: docker/standalone/Dockerfile
         target: ${{ matrix.target }}
+        build-args: ${{ matrix.build_args }}
         push: false
         load: false
+        cache-from: type=gha,scope=${{ matrix.name }}
+        cache-to: type=gha,mode=max,scope=${{ matrix.name }}
 
     # TODO: Re-enable smoke test when disk space issue is resolved
     # - name: Smoke test - verify container starts
