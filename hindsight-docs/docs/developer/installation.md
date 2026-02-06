@@ -75,7 +75,7 @@ docker run --rm -it -p 8888:8888 \
   -e HINDSIGHT_API_LLM_API_KEY=$OPENAI_API_KEY \
   -e HINDSIGHT_API_EMBEDDINGS_PROVIDER=openai \
   -e HINDSIGHT_API_RERANKER_PROVIDER=cohere \
-  -e COHERE_API_KEY=$COHERE_API_KEY \
+  -e HINDSIGHT_API_COHERE_API_KEY=$COHERE_API_KEY \
   ghcr.io/vectorize-io/hindsight:slim
 ```
 - ✅ Dramatically smaller image (~95% reduction on AMD64)
@@ -89,7 +89,24 @@ docker run --rm -it -p 8888:8888 \
 - Running on Text Embeddings Inference (TEI) infrastructure
 - Kubernetes environments with fast pull requirements
 
-See [Configuration](./configuration#embeddings-and-reranking) for embedding provider options.
+:::warning Slim Image Requires External Providers
+If you run the slim image **without** setting external embedding providers, you'll see this error:
+
+```
+ImportError: sentence-transformers is required for LocalSTEmbeddings.
+Install it with: pip install sentence-transformers
+```
+
+**Fix:** Always set embedding and reranking providers when using slim images:
+```bash
+-e HINDSIGHT_API_EMBEDDINGS_PROVIDER=openai
+-e HINDSIGHT_API_EMBEDDINGS_OPENAI_API_KEY=sk-xxx
+-e HINDSIGHT_API_RERANKER_PROVIDER=cohere
+-e HINDSIGHT_API_COHERE_API_KEY=xxx
+```
+:::
+
+See [Configuration](./configuration#embeddings-and-reranking) for all embedding provider options.
 
 ### Available Tags
 

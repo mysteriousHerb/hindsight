@@ -340,6 +340,7 @@ jobs:
         retention-days: 1
 
   release-docker-images:
+    name: Release Docker (${{ matrix.image_name }}${{ matrix.tag_suffix }})
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -436,7 +437,7 @@ jobs:
     # - name: Smoke test - verify container starts
     #   env:
     #     GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
-    #   run: ./scripts/docker-smoke-test.sh "${{ matrix.image_name }}:test" "${{ matrix.target }}"
+    #   run: ./docker/test-image.sh "${{ matrix.image_name }}:test" "${{ matrix.target }}"
 
     # Build multi-platform and push to release tags
     - name: Build and push release images
