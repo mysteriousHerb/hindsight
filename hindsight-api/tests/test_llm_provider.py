@@ -88,6 +88,7 @@ def should_skip_provider(provider: str, model: str = "") -> tuple[bool, str]:
 
 @pytest.mark.parametrize("provider,model", MODEL_MATRIX)
 @pytest.mark.asyncio
+@pytest.mark.timeout(300)  # Increase timeout for slow models like groq gpt-oss-120b
 async def test_llm_provider_api_methods(provider: str, model: str):
     """
     Test all LLM API methods used by Hindsight at runtime.
