@@ -1352,28 +1352,21 @@ def _convert_causal_relations(relations_from_llm, fact_start_idx: int) -> list[C
 
 def _add_temporal_offsets(facts: list[ExtractedFactType], contents: list[RetainContent]) -> None:
     """
-    Add time offsets to preserve fact ordering within each content.
+    Add time offsets to preserve fact ordering across all contents.
 
-    This allows retrieval to distinguish between facts that happened earlier vs later
-    in the same conversation, even when the base event_date is the same.
+    This allows retrieval to distinguish between facts from different documents/conversations
+    even when they have the same base event_date, and also between facts within the same
+    conversation.
+
+    Uses absolute position across all facts to ensure unique timestamps.
 
     Modifies facts in place.
     """
     from .orchestrator import parse_datetime_flexible
 
-    # Group facts by content_index
-    current_content_idx = 0
-    content_fact_start = 0
-
     for i, fact in enumerate(facts):
-        if fact.content_index != current_content_idx:
-            # Moved to next content
-            current_content_idx = fact.content_index
-            content_fact_start = i
-
-        # Calculate position within this content
-        fact_position = i - content_fact_start
-        offset = timedelta(seconds=fact_position * SECONDS_PER_FACT)
+        # Use absolute position across all facts to ensure uniqueness across different contents
+        offset = timedelta(seconds=i * SECONDS_PER_FACT)
 
         # Apply offset to all temporal fields (handle both datetime objects and ISO strings)
         if fact.occurred_start:
