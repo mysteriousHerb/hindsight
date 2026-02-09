@@ -4,12 +4,12 @@ Configuration resolution with hierarchical overrides.
 Resolves config values through the hierarchy:
   Global (env vars) → Tenant config (via extension) → Bank config (database)
 
-Implements LRU caching (max 1000 banks) for performance.
+Config values are resolved on every request to ensure consistency across
+multiple API servers. LLM provider instances are pooled separately.
 """
 
 import json
 import logging
-from collections import OrderedDict
 from dataclasses import asdict
 from typing import Any
 
@@ -20,12 +20,6 @@ from hindsight_api.extensions.tenant import TenantExtension
 from hindsight_api.models import RequestContext
 
 logger = logging.getLogger(__name__)
-
-# LRU cache for resolved bank configs
-# Structure: OrderedDict{bank_id: resolved_config_dict}
-# Max 1000 entries, oldest evicted when limit exceeded
-_CONFIG_CACHE: OrderedDict[str, dict[str, Any]] = OrderedDict()
-_CACHE_MAX_SIZE = 1000
 
 
 class ConfigResolver:
@@ -53,6 +47,9 @@ class ConfigResolver:
         2. Tenant config overrides (from TenantExtension.get_tenant_config())
         3. Bank config overrides (from banks.config JSONB)
 
+        Note: Config is resolved on every call (not cached) to ensure consistency
+        across multiple API servers. LLM provider instances are pooled separately.
+
         Args:
             bank_id: Bank identifier
             context: Request context for tenant config resolution
@@ -60,15 +57,6 @@ class ConfigResolver:
         Returns:
             Dict of all config values with hierarchical overrides applied
         """
-        # Check LRU cache
-        if bank_id in _CONFIG_CACHE:
-            logger.debug(f"Config cache hit for bank {bank_id}")
-            # Move to end (mark as recently used)
-            _CONFIG_CACHE.move_to_end(bank_id)
-            return _CONFIG_CACHE[bank_id]
-
-        logger.debug(f"Config cache miss for bank {bank_id}, loading from database")
-
         # Start with global config (all fields)
         config_dict = asdict(self._global_config)
 
@@ -92,17 +80,6 @@ class ConfigResolver:
         if bank_overrides:
             config_dict.update(bank_overrides)
             logger.debug(f"Applied bank config overrides for bank {bank_id}: {list(bank_overrides.keys())}")
-
-        # Add to LRU cache
-        _CONFIG_CACHE[bank_id] = config_dict
-
-        # Evict oldest entry if cache exceeds max size
-        if len(_CONFIG_CACHE) > _CACHE_MAX_SIZE:
-            evicted_bank_id = next(iter(_CONFIG_CACHE))  # First item (oldest)
-            del _CONFIG_CACHE[evicted_bank_id]
-            logger.debug(
-                f"Config cache full, evicted oldest entry: {evicted_bank_id} (cache size: {len(_CONFIG_CACHE)})"
-            )
 
         return config_dict
 
@@ -190,8 +167,6 @@ class ConfigResolver:
                 bank_id,
             )
 
-        # Invalidate cache
-        self.invalidate_cache(bank_id)
         logger.info(f"Updated bank config for {bank_id}: {list(normalized_updates.keys())}")
 
     async def reset_bank_config(self, bank_id: str) -> None:
@@ -212,26 +187,4 @@ class ConfigResolver:
                 bank_id,
             )
 
-        # Invalidate cache
-        self.invalidate_cache(bank_id)
         logger.info(f"Reset bank config for {bank_id} to defaults")
-
-    def invalidate_cache(self, bank_id: str) -> None:
-        """
-        Remove bank from LRU cache.
-
-        Called after config updates to ensure fresh data is loaded.
-
-        Args:
-            bank_id: Bank identifier to invalidate
-        """
-        if bank_id in _CONFIG_CACHE:
-            del _CONFIG_CACHE[bank_id]
-            logger.debug(f"Invalidated config cache for bank {bank_id}")
-
-    @staticmethod
-    def clear_all_cache() -> None:
-        """Clear the entire config cache. Useful for testing."""
-        global _CONFIG_CACHE
-        _CONFIG_CACHE.clear()
-        logger.info("Cleared entire config cache")

@@ -6,9 +6,10 @@ key normalization, API endpoints, validation, and caching.
 """
 
 import pytest
+
 from hindsight_api import MemoryEngine
-from hindsight_api.config import HindsightConfig, normalize_config_key, normalize_config_dict
-from hindsight_api.config_resolver import ConfigResolver, _CONFIG_CACHE
+from hindsight_api.config import HindsightConfig, normalize_config_dict, normalize_config_key
+from hindsight_api.config_resolver import ConfigResolver
 from hindsight_api.extensions.tenant import TenantExtension
 from hindsight_api.models import RequestContext
 
@@ -115,11 +116,11 @@ async def test_config_hierarchy_resolution(memory, request_context):
 
         # Test 3: Add bank-level overrides (should take precedence)
         await resolver.update_bank_config(
-            bank_id, {"llm_model": "bank-model", "retain_chunk_size": 2000}  # Override tenant setting  # Bank-only setting
+            bank_id,
+            {"llm_model": "bank-model", "retain_chunk_size": 2000},  # Override tenant setting  # Bank-only setting
         )
 
-        # Clear cache to force reload
-        resolver.invalidate_cache(bank_id)
+        # Config should reflect changes immediately (no caching)
         config = await resolver.get_bank_config(bank_id, context)
 
         # Bank overrides should take precedence over tenant
@@ -164,56 +165,44 @@ async def test_config_validation_rejects_static_fields(memory, request_context):
 
 
 @pytest.mark.asyncio
-async def test_config_lru_cache_behavior(memory, request_context):
-    """Test LRU cache hits, misses, and eviction."""
-    # Clear cache before test
-    _CONFIG_CACHE.clear()
-
-    # Create test banks
-    bank1 = "cache-test-1"
-    bank2 = "cache-test-2"
+async def test_config_freshness_across_updates(memory, request_context):
+    """Test that config changes are immediately visible (no stale cache)."""
+    bank1 = "freshness-test-1"
 
     try:
-        # Ensure banks exist in database
+        # Ensure bank exists in database
         await memory.get_bank_profile(bank1, request_context=request_context)
-        await memory.get_bank_profile(bank2, request_context=request_context)
 
         resolver = ConfigResolver(pool=memory._pool)
 
-        # Test 1: Cache miss on first access
-        assert bank1 not in _CONFIG_CACHE
+        # Test 1: Initial config reflects global defaults
         config1 = await resolver.get_bank_config(bank1, None)
-        assert bank1 in _CONFIG_CACHE
-        assert config1 == _CONFIG_CACHE[bank1]
+        initial_model = config1["llm_model"]
 
-        # Test 2: Cache hit on second access
-        config1_cached = await resolver.get_bank_config(bank1, None)
-        assert config1_cached == config1
-        assert config1_cached is _CONFIG_CACHE[bank1]  # Same object (cache hit)
+        # Test 2: Update config
+        await resolver.update_bank_config(bank1, {"llm_model": "updated-model-1"})
 
-        # Test 3: Different bank is separate cache entry
-        config2 = await resolver.get_bank_config(bank2, None)
-        assert bank2 in _CONFIG_CACHE
-        assert bank1 in _CONFIG_CACHE
-        # Configs will be equal if no overrides, but should be separate cache entries
-        assert config2 is not config1  # Different object instances
+        # Test 3: Next call should see updated value immediately (no stale cache)
+        config2 = await resolver.get_bank_config(bank1, None)
+        assert config2["llm_model"] == "updated-model-1"
 
-        # Test 4: Cache invalidation on update
-        await resolver.update_bank_config(bank1, {"llm_model": "updated-model"})
-        assert bank1 not in _CONFIG_CACHE  # Should be evicted
+        # Test 4: Multiple updates are all immediately visible
+        await resolver.update_bank_config(bank1, {"llm_model": "updated-model-2"})
+        config3 = await resolver.get_bank_config(bank1, None)
+        assert config3["llm_model"] == "updated-model-2"
 
-        # Next access will be cache miss
-        config1_updated = await resolver.get_bank_config(bank1, None)
-        assert bank1 in _CONFIG_CACHE
-        assert config1_updated["llm_model"] == "updated-model"
-
-        # Test 5: Reset clears overrides and invalidates cache
+        # Test 5: Reset restores global defaults immediately
         await resolver.reset_bank_config(bank1)
-        assert bank1 not in _CONFIG_CACHE
+        config4 = await resolver.get_bank_config(bank1, None)
+        assert config4["llm_model"] == initial_model  # Back to global default
+
+        # Test 6: Each call returns a fresh config dict (not a cached reference)
+        config5 = await resolver.get_bank_config(bank1, None)
+        config6 = await resolver.get_bank_config(bank1, None)
+        assert config5 is not config6  # Different object instances
 
     finally:
         await memory.delete_bank(bank1, request_context=request_context)
-        await memory.delete_bank(bank2, request_context=request_context)
 
 
 @pytest.mark.asyncio
@@ -274,7 +263,6 @@ async def test_config_supports_both_key_formats(memory, request_context):
         # Test 2: Env var format (should be normalized)
         await resolver.update_bank_config(bank_id, {"HINDSIGHT_API_LLM_MODEL": "env-format-model"})
 
-        resolver.invalidate_cache(bank_id)
         config = await resolver.get_bank_config(bank_id, None)
         assert config["llm_model"] == "env-format-model"
 
@@ -287,7 +275,6 @@ async def test_config_supports_both_key_formats(memory, request_context):
             },
         )
 
-        resolver.invalidate_cache(bank_id)
         config = await resolver.get_bank_config(bank_id, None)
         assert config["llm_model"] == "mixed-1"
         assert config["retain_extraction_mode"] == "verbose"
