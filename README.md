@@ -48,38 +48,33 @@ If you need more control over how and when your agent stores and recalls memorie
 ### Docker (recommended)
 
 ```bash
-export OPENAI_API_KEY=your-key
+export OPENAI_API_KEY=sk-xxx
 
 docker run --rm -it --pull always -p 8888:8888 -p 9999:9999 \
   -e HINDSIGHT_API_LLM_API_KEY=$OPENAI_API_KEY \
-  -e HINDSIGHT_API_LLM_MODEL=o3-mini \
   -v $HOME/.hindsight-docker:/home/hindsight/.pg0 \
   ghcr.io/vectorize-io/hindsight:latest
 ```
 
+>API: http://localhost:8888
+>UI: http://localhost:9999
+
 You can modify the LLM provider by setting `HINDSIGHT_API_LLM_PROVIDER`. Valid options are `openai`, `anthropic`, `gemini`, `groq`, `ollama`, and `lmstudio`. The documentation provides more details on [supported models](https://hindsight.vectorize.io/developer/models).
 
-### Docker compose
+
+
+### Docker (external PostgreSQL)
 
 ```bash
+export OPENAI_API_KEY=sk-xxx
+export HINDSIGHT_DB_PASSWORD=choose-a-password
 cd docker/docker-compose
-
-# edit the docker compose file with your favorite editor
-nano docker-compose.yaml
-
-# start hindsight with an external PostgeSQL
-docker compose up -d
-```
-
-```bash
-# stop and cleanup the pg volume with the optional parameter -v
-docker compose down -v
+docker compose up 
 ```
 
 
-
-API: http://localhost:8888
-UI: http://localhost:9999
+>API: http://localhost:8888
+>UI: http://localhost:9999
 
 Install client:
 
