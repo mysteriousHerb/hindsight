@@ -1,6 +1,7 @@
 """Integration test for MCP endpoint routing.
 
-This test verifies that /mcp/ and /mcp/{bank_id}/ expose different tool sets.
+This test verifies that /mcp/ and /mcp/{bank_id}/ expose different tool sets,
+and that URLs with or without trailing slashes both work (no 307 redirect).
 """
 
 import httpx
@@ -84,3 +85,50 @@ async def test_mcp_endpoint_routing_integration(memory):
                     assert retain_tool is not None
                     single_params = set(retain_tool.inputSchema.get("properties", {}).keys())
                     assert "bank_id" not in single_params, "Single-bank retain should NOT have bank_id parameter"
+
+
+@pytest.mark.asyncio
+async def test_mcp_no_trailing_slash_works(memory):
+    """Test that /mcp (no trailing slash) discovers tools without 307 redirect.
+
+    Starlette's Mount class redirects /mcp to /mcp/ with a 307 Temporary Redirect.
+    Many MCP clients don't follow POST redirects, causing 0 tools to be discovered.
+    The _MCPPathRewriteMiddleware fixes this by rewriting the path before routing.
+    """
+    from hindsight_api.api import create_app
+
+    app = create_app(memory, mcp_api_enabled=True, initialize_memory=False)
+
+    async with app.router.lifespan_context(app):
+        from httpx import ASGITransport
+
+        async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as http_client:
+            # /mcp (no slash) should work the same as /mcp/
+            async with streamable_http_client("http://test/mcp", http_client=http_client) as (
+                read_stream,
+                write_stream,
+                _,
+            ):
+                async with ClientSession(read_stream, write_stream) as session:
+                    await session.initialize()
+                    result = await session.list_tools()
+
+                    tools = {t.name for t in result.tools}
+                    assert len(tools) == 11, f"Expected 11 tools from /mcp, got {len(tools)}: {tools}"
+                    assert "retain" in tools
+                    assert "recall" in tools
+                    assert "list_banks" in tools
+
+            # /mcp/my-bank (single-bank, no slash) should also work
+            async with streamable_http_client("http://test/mcp/my-bank", http_client=http_client) as (
+                read_stream,
+                write_stream,
+                _,
+            ):
+                async with ClientSession(read_stream, write_stream) as session:
+                    await session.initialize()
+                    result = await session.list_tools()
+
+                    tools = {t.name for t in result.tools}
+                    assert "retain" in tools
+                    assert "list_banks" not in tools, "Single-bank /mcp/my-bank should NOT expose list_banks"

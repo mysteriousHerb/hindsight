@@ -9,10 +9,31 @@ from contextlib import asynccontextmanager
 from typing import Optional
 
 from fastapi import FastAPI
+from starlette.types import ASGIApp, Receive, Scope, Send
 
 from hindsight_api import MemoryEngine
 
 logger = logging.getLogger(__name__)
+
+
+class _MCPPathRewriteMiddleware:
+    """Rewrite /mcp to /mcp/ to prevent Starlette's 307 redirect.
+
+    Starlette's Mount class redirects exact path matches (e.g., /mcp -> /mcp/)
+    with a 307 Temporary Redirect. Many MCP clients don't follow POST redirects,
+    which causes tool discovery to fail (0 tools). This middleware rewrites the
+    path before routing so the Mount matches directly.
+    """
+
+    def __init__(self, app: ASGIApp, mcp_path: str = "/mcp"):
+        self.app = app
+        self.mcp_path = mcp_path
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send):
+        if scope["type"] == "http" and scope.get("path") == self.mcp_path:
+            scope = dict(scope)
+            scope["path"] = self.mcp_path + "/"
+        await self.app(scope, receive, send)
 
 
 def create_app(
@@ -96,6 +117,10 @@ def create_app(
 
         # Mount the MCP middleware
         app.mount(mcp_mount_path, mcp_app)
+
+        # Prevent 307 redirect for /mcp (no trailing slash) which breaks MCP clients
+        app.add_middleware(_MCPPathRewriteMiddleware, mcp_path=mcp_mount_path)
+
         logger.info(f"MCP server enabled at {mcp_mount_path}/")
 
     return app
