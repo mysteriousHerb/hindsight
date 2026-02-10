@@ -5,6 +5,8 @@ Tests config resolution hierarchy (global → tenant → bank),
 key normalization, API endpoints, validation, and caching.
 """
 
+import os
+
 import pytest
 
 from hindsight_api import MemoryEngine
@@ -12,6 +14,9 @@ from hindsight_api.config import HindsightConfig, normalize_config_dict, normali
 from hindsight_api.config_resolver import ConfigResolver
 from hindsight_api.extensions.tenant import TenantExtension
 from hindsight_api.models import RequestContext
+
+# Enable bank config API for all tests in this module
+os.environ["HINDSIGHT_API_ENABLE_BANK_CONFIG_API"] = "true"
 
 
 class MockTenantExtension(TenantExtension):

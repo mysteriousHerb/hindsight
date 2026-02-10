@@ -227,6 +227,7 @@ def main():
             log_level=args.log_level,
             log_format=config.log_format,
             mcp_enabled=config.mcp_enabled,
+            enable_bank_config_api=config.enable_bank_config_api,
             graph_retriever=config.graph_retriever,
             mpfp_top_k_neighbors=config.mpfp_top_k_neighbors,
             recall_max_concurrent=config.recall_max_concurrent,

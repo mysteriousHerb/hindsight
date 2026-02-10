@@ -3371,6 +3371,11 @@ def _register_routes(app: FastAPI):
     )
     async def api_get_bank_config(bank_id: str, request_context: RequestContext = Depends(get_request_context)):
         """Get configuration for a bank with all hierarchical overrides applied."""
+        if not app.state.config.enable_bank_config_api:
+            raise HTTPException(
+                status_code=403,
+                detail="Bank configuration API is disabled. Set HINDSIGHT_API_ENABLE_BANK_CONFIG_API=true to enable.",
+            )
         try:
             # Get resolved config from config resolver
             config_dict = await app.state.memory._config_resolver.get_bank_config(bank_id, request_context)
@@ -3401,6 +3406,11 @@ def _register_routes(app: FastAPI):
         bank_id: str, request: BankConfigUpdate, request_context: RequestContext = Depends(get_request_context)
     ):
         """Update configuration overrides for a bank."""
+        if not app.state.config.enable_bank_config_api:
+            raise HTTPException(
+                status_code=403,
+                detail="Bank configuration API is disabled. Set HINDSIGHT_API_ENABLE_BANK_CONFIG_API=true to enable.",
+            )
         try:
             # Update config via config resolver (validates hierarchical fields)
             await app.state.memory._config_resolver.update_bank_config(bank_id, request.updates)
@@ -3433,6 +3443,11 @@ def _register_routes(app: FastAPI):
     )
     async def api_reset_bank_config(bank_id: str, request_context: RequestContext = Depends(get_request_context)):
         """Reset bank configuration to defaults (remove all overrides)."""
+        if not app.state.config.enable_bank_config_api:
+            raise HTTPException(
+                status_code=403,
+                detail="Bank configuration API is disabled. Set HINDSIGHT_API_ENABLE_BANK_CONFIG_API=true to enable.",
+            )
         try:
             # Reset config via config resolver
             await app.state.memory._config_resolver.reset_bank_config(bank_id)
