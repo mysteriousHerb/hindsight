@@ -567,7 +567,7 @@ Hindsight provides OpenTelemetry-based observability for LLM calls, conforming t
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `HINDSIGHT_API_OTEL_TRACES_ENABLED` | Enable distributed tracing for LLM calls | `false` |
-| `HINDSIGHT_API_OTEL_EXPORTER_OTLP_ENDPOINT` | OTLP endpoint URL (e.g., Langfuse, Jaeger, etc.) | - |
+| `HINDSIGHT_API_OTEL_EXPORTER_OTLP_ENDPOINT` | OTLP endpoint URL (e.g., Grafana LGTM, Langfuse, etc.) | - |
 | `HINDSIGHT_API_OTEL_EXPORTER_OTLP_HEADERS` | Headers for OTLP exporter (format: "key1=value1,key2=value2") | - |
 | `HINDSIGHT_API_OTEL_SERVICE_NAME` | Service name for traces | `hindsight-api` |
 | `HINDSIGHT_API_OTEL_DEPLOYMENT_ENVIRONMENT` | Deployment environment name (e.g., development, staging, production) | `development` |
@@ -582,10 +582,9 @@ Hindsight provides OpenTelemetry-based observability for LLM calls, conforming t
 **OTLP-Compatible Backends:**
 
 The tracing implementation uses standard OTLP HTTP protocol, so it works with any OTLP-compatible backend:
-- **OpenLIT**: Built-in LLM dashboards, cost tracking
+- **Grafana LGTM** (Recommended for local dev): All-in-one stack with Tempo traces, Loki logs, Mimir metrics, and Grafana UI
 - **Langfuse**: LLM-focused observability and analytics
-- **Jaeger**: Lightweight distributed tracing
-- **Grafana Tempo**: Scalable trace backend
+- **OpenLIT**: Built-in LLM dashboards, cost tracking
 - **SigNoz**: Full observability platform
 - **DataDog, New Relic, Honeycomb**: Commercial platforms
 
@@ -606,7 +605,15 @@ export HINDSIGHT_API_OTEL_DEPLOYMENT_ENVIRONMENT=production
 
 **Local Development:**
 
-For local development, see `scripts/dev/jaeger/README.md` for a quick setup with Jaeger, or `scripts/dev/openlit/README.md` for OpenLIT.
+For local development, we recommend the Grafana LGTM stack which provides traces, metrics, and logs in a single container:
+
+```bash
+./scripts/dev/start-grafana.sh
+```
+
+See `scripts/dev/grafana/README.md` for detailed setup instructions.
+
+Other options: See `scripts/dev/openlit/README.md` for OpenLIT or `scripts/dev/jaeger/README.md` for standalone Jaeger.
 
 ### Metrics
 
