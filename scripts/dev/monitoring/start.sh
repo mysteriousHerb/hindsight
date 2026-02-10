@@ -27,11 +27,6 @@ if ! curl -s "http://localhost:$API_PORT/metrics" > /dev/null 2>&1; then
     echo ""
 fi
 
-docker-compose up -d
-
-echo ""
-echo "✅ Monitoring Stack started!"
-echo ""
 echo "Access Grafana UI: http://localhost:3000"
 echo "  (no login required for dev - anonymous admin enabled)"
 echo ""
@@ -53,5 +48,7 @@ echo "  • Traces: http://localhost:3000 → Explore → Tempo"
 echo "  • Metrics: http://localhost:3000 → Dashboards"
 echo "  • Raw Metrics: http://localhost:$API_PORT/metrics"
 echo ""
-echo "Stop with: cd $SCRIPT_DIR && docker-compose down"
+echo "Press Ctrl+C to stop"
 echo ""
+
+docker-compose up
