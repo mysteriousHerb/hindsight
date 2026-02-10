@@ -657,6 +657,35 @@ The Control Plane is the web UI for managing memory banks.
 export HINDSIGHT_CP_DATAPLANE_API_URL=http://api.example.com:8888
 ```
 
+### Hierarchical Configuration
+
+Hindsight supports per-bank configuration overrides through a hierarchical system: **Global (env vars) → Tenant → Bank**.
+
+Configuration can be customized at the bank level via REST API for configurable fields (retention parameters, observation settings, etc.). Static fields (database URL, port, LLM config) cannot be overridden.
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `HINDSIGHT_API_ENABLE_BANK_CONFIG_API` | Enable per-bank config API | `false` |
+
+**Important:** The bank config API is **disabled by default** for security. Enable it explicitly:
+
+```bash
+export HINDSIGHT_API_ENABLE_BANK_CONFIG_API=true
+```
+
+**API Endpoints:**
+- `GET /v1/default/banks/{bank_id}/config` - View resolved config
+- `PATCH /v1/default/banks/{bank_id}/config` - Update bank overrides
+- `DELETE /v1/default/banks/{bank_id}/config` - Reset to defaults
+
+**Example:**
+```bash
+# Enable observations for a specific bank
+curl -X PATCH http://localhost:8888/v1/default/banks/my-bank/config \
+  -H "Content-Type: application/json" \
+  -d '{"updates": {"enable_observations": true}}'
+```
+
 ### Reverse Proxy / Subpath Deployment
 
 To deploy Hindsight under a subpath (e.g., `example.com/hindsight/`):
@@ -721,7 +750,6 @@ See `docker/compose-examples/` directory for:
 - Docker Compose setups (`docker-compose.yml`, `reverse-proxy-only.yml`)
 - Traefik and other reverse proxy examples
 - Full deployment documentation
-
 ---
 
 ## Example .env File
