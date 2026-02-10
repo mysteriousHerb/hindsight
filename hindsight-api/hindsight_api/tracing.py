@@ -50,10 +50,14 @@ class NoOpTracer:
     """No-op tracer that provides the same interface as OpenTelemetry Tracer but does nothing."""
 
     def start_as_current_span(self, name: str, **kwargs):
-        """Return a no-op context manager."""
-        from contextlib import nullcontext
+        """Return a no-op context manager that yields a NoOpSpan."""
+        from contextlib import contextmanager
 
-        return nullcontext()
+        @contextmanager
+        def noop_span_context():
+            yield NoOpSpan()
+
+        return noop_span_context()
 
     def start_span(self, name: str, **kwargs):
         """Return a no-op span."""

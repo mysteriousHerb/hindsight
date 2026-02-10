@@ -1707,21 +1707,17 @@ class MemoryEngine(MemoryEngineInterface):
             logger.info(f"[RECALL {bank_id[:8]}] Starting recall for query: {query[:50]}...{tags_info}")
 
         # Create parent span for recall operation
-        from ..tracing import get_tracer, is_tracing_enabled
+        from ..tracing import get_tracer
 
         tracer = get_tracer()
-        if is_tracing_enabled():
-            # Use start_as_current_span to ensure child spans are linked properly
-            recall_span_context = tracer.start_as_current_span("hindsight.recall")
-            recall_span = recall_span_context.__enter__()
-            recall_span.set_attribute("hindsight.bank_id", bank_id)
-            recall_span.set_attribute("hindsight.query", query[:100])
-            recall_span.set_attribute("hindsight.fact_types", ",".join(fact_type))
-            recall_span.set_attribute("hindsight.thinking_budget", thinking_budget)
-            recall_span.set_attribute("hindsight.max_tokens", max_tokens)
-        else:
-            recall_span_context = None
-            recall_span = None
+        # Use start_as_current_span to ensure child spans are linked properly
+        recall_span_context = tracer.start_as_current_span("hindsight.recall")
+        recall_span = recall_span_context.__enter__()
+        recall_span.set_attribute("hindsight.bank_id", bank_id)
+        recall_span.set_attribute("hindsight.query", query[:100])
+        recall_span.set_attribute("hindsight.fact_types", ",".join(fact_type))
+        recall_span.set_attribute("hindsight.thinking_budget", thinking_budget)
+        recall_span.set_attribute("hindsight.max_tokens", max_tokens)
 
         try:
             # Backpressure: limit concurrent recalls to prevent overwhelming the database
@@ -1855,8 +1851,7 @@ class MemoryEngine(MemoryEngineInterface):
 
             return result
         finally:
-            if recall_span_context:
-                recall_span_context.__exit__(None, None, None)
+            recall_span_context.__exit__(None, None, None)
 
     async def _search_with_retries(
         self,
@@ -1924,7 +1919,7 @@ class MemoryEngine(MemoryEngineInterface):
         )
 
         # Import tracing utilities
-        from ..tracing import get_tracer, is_tracing_enabled
+        from ..tracing import get_tracer
 
         tracer_otel = get_tracer()
 
@@ -1932,20 +1927,16 @@ class MemoryEngine(MemoryEngineInterface):
             # Step 1: Generate query embedding (for semantic search)
             step_start = time.time()
 
-            if is_tracing_enabled():
-                embedding_span = tracer_otel.start_span("hindsight.recall_embedding")
-                embedding_span.set_attribute("hindsight.bank_id", bank_id)
-                embedding_span.set_attribute("hindsight.query", query[:100])
-            else:
-                embedding_span = None
+            embedding_span = tracer_otel.start_span("hindsight.recall_embedding")
+            embedding_span.set_attribute("hindsight.bank_id", bank_id)
+            embedding_span.set_attribute("hindsight.query", query[:100])
 
             try:
                 query_embedding = embedding_utils.generate_embedding(self.embeddings, query)
                 step_duration = time.time() - step_start
                 log_buffer.append(f"  [1] Generate query embedding: {step_duration:.3f}s")
             finally:
-                if embedding_span:
-                    embedding_span.end()
+                embedding_span.end()
 
             if tracer:
                 tracer.record_query_embedding(query_embedding)
@@ -1966,13 +1957,10 @@ class MemoryEngine(MemoryEngineInterface):
             # Track each retrieval start time
             retrieval_start = time.time()
 
-            if is_tracing_enabled():
-                retrieval_span = tracer_otel.start_span("hindsight.recall_retrieval")
-                retrieval_span.set_attribute("hindsight.bank_id", bank_id)
-                retrieval_span.set_attribute("hindsight.fact_types", ",".join(fact_type))
-                retrieval_span.set_attribute("hindsight.thinking_budget", thinking_budget)
-            else:
-                retrieval_span = None
+            retrieval_span = tracer_otel.start_span("hindsight.recall_retrieval")
+            retrieval_span.set_attribute("hindsight.bank_id", bank_id)
+            retrieval_span.set_attribute("hindsight.fact_types", ",".join(fact_type))
+            retrieval_span.set_attribute("hindsight.thinking_budget", thinking_budget)
 
             try:
                 # Run optimized retrieval with connection budget
@@ -2000,8 +1988,7 @@ class MemoryEngine(MemoryEngineInterface):
                     )
                     parallel_duration = time.time() - parallel_start
             finally:
-                if retrieval_span:
-                    retrieval_span.end()
+                retrieval_span.end()
 
             # Combine all results from all fact types and aggregate timings
             semantic_results = []
@@ -2188,15 +2175,12 @@ class MemoryEngine(MemoryEngineInterface):
             step_start = time.time()
             from .search.fusion import reciprocal_rank_fusion
 
-            if is_tracing_enabled():
-                fusion_span = tracer_otel.start_span("hindsight.recall_fusion")
-                fusion_span.set_attribute("hindsight.bank_id", bank_id)
-                fusion_span.set_attribute("hindsight.semantic_count", len(semantic_results))
-                fusion_span.set_attribute("hindsight.bm25_count", len(bm25_results))
-                fusion_span.set_attribute("hindsight.graph_count", len(graph_results))
-                fusion_span.set_attribute("hindsight.temporal_count", len(temporal_results) if temporal_results else 0)
-            else:
-                fusion_span = None
+            fusion_span = tracer_otel.start_span("hindsight.recall_fusion")
+            fusion_span.set_attribute("hindsight.bank_id", bank_id)
+            fusion_span.set_attribute("hindsight.semantic_count", len(semantic_results))
+            fusion_span.set_attribute("hindsight.bm25_count", len(bm25_results))
+            fusion_span.set_attribute("hindsight.graph_count", len(graph_results))
+            fusion_span.set_attribute("hindsight.temporal_count", len(temporal_results) if temporal_results else 0)
 
             try:
                 # Merge 3 or 4 result lists depending on temporal constraint
@@ -2208,11 +2192,12 @@ class MemoryEngine(MemoryEngineInterface):
                     merged_candidates = reciprocal_rank_fusion([semantic_results, bm25_results, graph_results])
 
                 step_duration = time.time() - step_start
-                log_buffer.append(f"  [3] RRF merge: {len(merged_candidates)} unique candidates in {step_duration:.3f}s")
+                log_buffer.append(
+                    f"  [3] RRF merge: {len(merged_candidates)} unique candidates in {step_duration:.3f}s"
+                )
             finally:
-                if fusion_span:
-                    fusion_span.set_attribute("hindsight.merged_count", len(merged_candidates))
-                    fusion_span.end()
+                fusion_span.set_attribute("hindsight.merged_count", len(merged_candidates))
+                fusion_span.end()
 
             if tracer:
                 # Convert MergedCandidate to old tuple format for tracer
@@ -2227,12 +2212,9 @@ class MemoryEngine(MemoryEngineInterface):
             step_start = time.time()
             reranker_instance = self._cross_encoder_reranker
 
-            if is_tracing_enabled():
-                rerank_span = tracer_otel.start_span("hindsight.recall_rerank")
-                rerank_span.set_attribute("hindsight.bank_id", bank_id)
-                rerank_span.set_attribute("hindsight.candidates_count", len(merged_candidates))
-            else:
-                rerank_span = None
+            rerank_span = tracer_otel.start_span("hindsight.recall_rerank")
+            rerank_span.set_attribute("hindsight.bank_id", bank_id)
+            rerank_span.set_attribute("hindsight.candidates_count", len(merged_candidates))
 
             try:
                 # Ensure reranker is initialized (for lazy initialization mode)
@@ -2257,11 +2239,10 @@ class MemoryEngine(MemoryEngineInterface):
                     f"  [4] Reranking: {len(scored_results)} candidates scored in {step_duration:.3f}s{pre_filter_note}"
                 )
             finally:
-                if rerank_span:
-                    rerank_span.set_attribute("hindsight.scored_count", len(scored_results))
-                    if pre_filtered_count > 0:
-                        rerank_span.set_attribute("hindsight.pre_filtered_count", pre_filtered_count)
-                    rerank_span.end()
+                rerank_span.set_attribute("hindsight.scored_count", len(scored_results))
+                if pre_filtered_count > 0:
+                    rerank_span.set_attribute("hindsight.pre_filtered_count", pre_filtered_count)
+                rerank_span.end()
 
             # Step 4.5: Combine cross-encoder score with retrieval signals
             # This preserves retrieval work (RRF, temporal, recency) instead of pure cross-encoder ranking
@@ -3858,10 +3839,12 @@ class MemoryEngine(MemoryEngineInterface):
             ]
 
             # Convert agent LLM trace to LLMCallTrace objects
-            llm_trace_result = [LLMCallTrace(scope=lc.scope, duration_ms=lc.duration_ms) for lc in agent_result.llm_trace]
+            llm_trace_result = [
+                LLMCallTrace(scope=lc.scope, duration_ms=lc.duration_ms) for lc in agent_result.llm_trace
+            ]
 
             # Extract memories from recall tool outputs - only include memories the agent actually used
-        # agent_result.used_memory_ids contains validated IDs from the done action
+            # agent_result.used_memory_ids contains validated IDs from the done action
             used_memory_ids_set = set(agent_result.used_memory_ids) if agent_result.used_memory_ids else set()
             # based_on stores facts, mental models, and directives
             # Note: directives list stores raw directive dicts (not MemoryFact), which will be converted to Directive objects
@@ -3898,7 +3881,9 @@ class MemoryEngine(MemoryEngineInterface):
 
             # Extract mental models from tool outputs - only include models the agent actually used
             # agent_result.used_mental_model_ids contains validated IDs from the done action
-            used_model_ids_set = set(agent_result.used_mental_model_ids) if agent_result.used_mental_model_ids else set()
+            used_model_ids_set = (
+                set(agent_result.used_mental_model_ids) if agent_result.used_mental_model_ids else set()
+            )
             based_on["mental-models"] = []
             seen_model_ids: set[str] = set()
             for tc in agent_result.tool_trace:
