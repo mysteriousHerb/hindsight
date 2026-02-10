@@ -243,15 +243,11 @@ class MCPMiddleware:
         bank_id = self._get_header(scope, "X-Bank-Id")
         bank_id_from_path = False
 
-        # MCP endpoint paths that should not be treated as bank_ids
-        MCP_ENDPOINTS = {"sse", "messages"}
-
         # If no header, try to extract from path: /{bank_id}/...
         new_path = path
         if not bank_id and path.startswith("/") and len(path) > 1:
             parts = path[1:].split("/", 1)
-            # Don't treat MCP endpoints as bank_ids
-            if parts[0] and parts[0] not in MCP_ENDPOINTS:
+            if parts[0]:
                 # First segment looks like a bank_id
                 bank_id = parts[0]
                 bank_id_from_path = True
@@ -280,9 +276,19 @@ class MCPMiddleware:
             # Clear root_path since we're passing directly to the app
             new_scope["root_path"] = ""
 
-            # Wrap send to rewrite the SSE endpoint URL to include bank_id if using path-based routing
+            # Wrap send to rewrite the SSE endpoint URL to include bank_id if using path-based routing.
+            # Only rewrite SSE (text/event-stream) responses to avoid corrupting tool results
+            # that might contain the literal string "data: /messages".
+            is_sse_response = False
+
             async def send_wrapper(message):
-                if message["type"] == "http.response.body" and bank_id_from_path:
+                nonlocal is_sse_response
+                if message["type"] == "http.response.start":
+                    for header_name, header_value in message.get("headers", []):
+                        if header_name == b"content-type" and b"text/event-stream" in header_value:
+                            is_sse_response = True
+                            break
+                if message["type"] == "http.response.body" and bank_id_from_path and is_sse_response:
                     body = message.get("body", b"")
                     if body and b"/messages" in body:
                         # Rewrite /messages to /{bank_id}/messages in SSE endpoint event
