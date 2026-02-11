@@ -1,63 +1,45 @@
-version: '3.8'
-
-# Hindsight deployment with Nginx reverse proxy and base path
+# Hindsight API deployment with Nginx reverse proxy (API-only)
 #
-# This example deploys Hindsight under the path /hindsight with:
-# - PostgreSQL database
-# - Hindsight (standalone image with API + Control Plane)
-# - Nginx reverse proxy
+# This example deploys Hindsight API under the path /hindsight with:
+# - Hindsight standalone image (API + Control Plane + embedded pg0)
+# - Nginx reverse proxy (API only)
 #
-# Prerequisites:
-#   1. Build the Hindsight Docker image:
-#      docker build -t hindsight:latest -f docker/standalone/Dockerfile .
-#
-#   2. Set your LLM API key:
-#      export OPENAI_API_KEY=your-key-here
-#      # or set ANTHROPIC_API_KEY, etc. depending on your provider
-#
-# Usage:
+# Quick Start:
 #   docker-compose -f docker/docker-compose/nginx/docker-compose.yml up
 #
 # Access:
-#   API docs: http://localhost:8080/hindsight/docs
-#   Control Plane: http://localhost:8080/hindsight/
+#   API (via nginx):         http://localhost:8080/hindsight/docs
+#   Control Plane (direct):  http://localhost:9999
+#
+# For full stack deployment (API + Control Plane both under /hindsight):
+#   See README.md in this directory for instructions on building with basePath.
+#
+# Note: This configuration uses the published image (no build required).
+#       Control Plane is served directly because Next.js basePath requires
+#       build-time configuration. See README.md for the full stack option.
 
 services:
-  # PostgreSQL database with pgvector
-  postgres:
-    image: ankane/pgvector:latest
-    environment:
-      POSTGRES_DB: hindsight
-      POSTGRES_USER: hindsight
-      POSTGRES_PASSWORD: hindsight_dev
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U hindsight"]
-      interval: 5s
-      timeout: 5s
-      retries: 5
-    networks:
-      - hindsight
-
-  # Hindsight (API + Control Plane)
+  # Hindsight (API + Control Plane + embedded pg0)
   hindsight:
-    image: hindsight:latest
+    image: ghcr.io/vectorize-io/hindsight:latest
+    ports:
+      - "9999:9999"  # Control Plane (direct access, not proxied)
     environment:
-      # Database
-      HINDSIGHT_API_DATABASE_URL: postgresql://hindsight:hindsight_dev@postgres:5432/hindsight
-
-      # Base path configuration (must match Nginx location)
+      # API base path for reverse proxy
       HINDSIGHT_API_BASE_PATH: /hindsight
-      NEXT_PUBLIC_BASE_PATH: /hindsight
 
-      # LLM configuration - customize for your provider
-      # OpenAI (default):
-      HINDSIGHT_API_LLM_PROVIDER: openai
-      HINDSIGHT_API_LLM_API_KEY: ${OPENAI_API_KEY}
-      HINDSIGHT_API_LLM_MODEL: gpt-4o-mini
+      # LLM configuration
+      # Using mock provider for testing (no API key needed)
+      # For production, set OPENAI_API_KEY or ANTHROPIC_API_KEY and use a real provider
+      HINDSIGHT_API_LLM_PROVIDER: ${HINDSIGHT_API_LLM_PROVIDER:-mock}
+      HINDSIGHT_API_LLM_API_KEY: ${OPENAI_API_KEY:-not-needed-for-mock}
+      HINDSIGHT_API_LLM_MODEL: ${HINDSIGHT_API_LLM_MODEL:-mock-model}
 
-      # Alternative providers (uncomment and set appropriate API key):
+      # Production examples (uncomment and set appropriate API key):
+      # HINDSIGHT_API_LLM_PROVIDER: openai
+      # HINDSIGHT_API_LLM_API_KEY: ${OPENAI_API_KEY}
+      # HINDSIGHT_API_LLM_MODEL: gpt-4o-mini
+
       # HINDSIGHT_API_LLM_PROVIDER: anthropic
       # HINDSIGHT_API_LLM_API_KEY: ${ANTHROPIC_API_KEY}
       # HINDSIGHT_API_LLM_MODEL: claude-sonnet-4-20250514
@@ -69,13 +51,14 @@ services:
 
       # Control Plane config
       HINDSIGHT_CP_DATAPLANE_API_URL: http://localhost:8888
-    ports:
-      # Expose directly for debugging (optional - not needed for reverse proxy)
-      # - "8888:8888"  # API
-      # - "9999:9999"  # Control Plane
-    depends_on:
-      postgres:
-        condition: service_healthy
+    volumes:
+      # Persist embedded pg0 database
+      - hindsight_data:/app/data
+    # Note: Ports not exposed - access via Nginx at localhost:8080/hindsight/
+    # To debug directly, uncomment these ports:
+    # ports:
+    #   - "8888:8888"  # API
+    #   - "9999:9999"  # Control Plane
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8888/hindsight/health"]
       interval: 10s
@@ -99,7 +82,7 @@ services:
       - hindsight
 
 volumes:
-  postgres_data:
+  hindsight_data:
 
 networks:
   hindsight:

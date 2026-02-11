@@ -1,136 +1,164 @@
 # Nginx Reverse Proxy Deployment
 
-This directory contains a production-ready Docker Compose setup for deploying Hindsight behind an Nginx reverse proxy with path-based routing (subpath deployment).
+This directory contains a production-ready example for deploying Hindsight behind an Nginx reverse proxy with a custom base path (e.g., `/hindsight`).
 
-## Use Case
+## Quick Start (API-only, no rebuild)
 
-Deploy Hindsight under a subpath (e.g., `https://example.com/hindsight/`) instead of the root domain. This is useful when:
-- Hosting multiple services under a single domain
-- Using API gateways with path-based routing
-- Running behind corporate proxies
-- Multi-tenant deployments with path isolation
-
-## Quick Start
-
-### 1. Build the Docker Image
-
-```bash
-# From repo root
-docker build -t hindsight:latest -f docker/standalone/Dockerfile .
-```
-
-### 2. Set Your LLM API Key
-
-```bash
-export OPENAI_API_KEY=your-key-here
-
-# Or for other providers:
-# export ANTHROPIC_API_KEY=your-key-here
-```
-
-### 3. Start the Stack
+Use the published Docker image for API reverse proxy:
 
 ```bash
 docker-compose -f docker/docker-compose/nginx/docker-compose.yml up
 ```
 
-### 4. Verify
+**Access:**
+- API docs: http://localhost:8080/hindsight/docs
+- API health: http://localhost:8080/hindsight/health
+- API endpoints: http://localhost:8080/hindsight/v1/...
+- Control Plane (direct): http://localhost:9999
 
-Access Hindsight at `http://localhost:8080/hindsight/`:
+This works with the published image - no build required!
 
-```bash
-# API health check
-curl http://localhost:8080/hindsight/health
+## Full Stack with Control Plane (requires build)
 
-# OpenAPI docs
-open http://localhost:8080/hindsight/docs
+To deploy **both** API and Control Plane under `/hindsight`, you need to build locally with the base path configured:
 
-# Control Plane UI
-open http://localhost:8080/hindsight/
+### 1. Update docker-compose.yml
+
+Uncomment the `build:` section and add `NEXT_PUBLIC_BASE_PATH` build arg:
+
+```yaml
+services:
+  hindsight:
+    build:
+      context: ../../..
+      dockerfile: docker/standalone/Dockerfile
+      target: standalone
+      args:
+        NEXT_PUBLIC_BASE_PATH: /hindsight  # ← Add this
+    image: ghcr.io/vectorize-io/hindsight:latest
+    environment:
+      HINDSIGHT_API_BASE_PATH: /hindsight
+      NEXT_PUBLIC_BASE_PATH: /hindsight   # ← Add this
+      # ... rest of environment
 ```
 
-## Configuration Files
+### 2. Update Dockerfile
 
-### `simple.conf`
+Add the build arg in `docker/standalone/Dockerfile` (around line 108):
 
-Basic reverse proxy for API only. Use this when:
-- You only need the API (headless deployment)
-- Control Plane is hosted separately
-- You're using a different UI
+```dockerfile
+# Copy built SDK directly into node_modules
+COPY --from=sdk-builder /app/hindsight-clients/typescript ./node_modules/@vectorize-io/hindsight-client
 
-### `api-and-control-plane.conf`
+# Accept base path as build argument (for reverse proxy deployments)
+ARG NEXT_PUBLIC_BASE_PATH=""
 
-Routes both API and Control Plane under the same base path. The router intelligently:
-- Routes `/hindsight/v1/*`, `/hindsight/docs`, `/hindsight/health` to the API
-- Routes `/hindsight/*` (UI pages) to the Control Plane
-- Handles static assets (JS/CSS) correctly
-
-### `docker-compose.yml`
-
-Complete production-ready setup with:
-- Hindsight API
-- Hindsight Control Plane
-- Nginx reverse proxy
-- PostgreSQL database
-- All configured with base path `/hindsight`
-
-## Testing
-
-Run the integration test to verify your setup:
-
-```bash
-./scripts/test-basepath.sh
+# Build Control Plane
+RUN npm exec -- next build
 ```
 
-This will:
-1. Start API and Control Plane with base path
-2. Start Nginx
-3. Test all endpoints through the proxy
-4. Clean up
+### 3. Update nginx.conf
 
-## Troubleshooting
+Replace the nginx.conf content to handle both API and Control Plane:
 
-### 404 on API endpoints
+```nginx
+events {
+    worker_connections 1024;
+}
 
-**Problem:** API returns 404 for all requests
+http {
+    include /etc/nginx/mime.types;
+    default_type application/octet-stream;
 
-**Solution:** Ensure `HINDSIGHT_API_BASE_PATH` matches your Nginx location:
-```bash
-# If Nginx uses location /hindsight/
-export HINDSIGHT_API_BASE_PATH=/hindsight
+    upstream hindsight_api {
+        server hindsight:8888;
+    }
+
+    upstream hindsight_cp {
+        server hindsight:9999;
+    }
+
+    server {
+        listen 80;
+        server_name _;
+
+        # API endpoints
+        location ~ ^/hindsight/(docs|openapi\.json|health|metrics|v1|mcp) {
+            proxy_pass http://hindsight_api;
+            proxy_set_header Host $http_host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+        }
+
+        # Next.js static files
+        location ~ ^/hindsight/_next/ {
+            proxy_pass http://hindsight_cp;
+            proxy_set_header Host $http_host;
+        }
+
+        # Control Plane UI
+        location /hindsight {
+            proxy_pass http://hindsight_cp;
+            proxy_set_header Host $http_host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+        }
+
+        location = / {
+            return 301 /hindsight;
+        }
+    }
+}
 ```
 
-### Static assets fail to load (Control Plane)
+### 4. Build and Run
 
-**Problem:** Browser console shows 404 for CSS/JS files
-
-**Solution:** Ensure both `basePath` and `assetPrefix` are set in `next.config.ts` and `NEXT_PUBLIC_BASE_PATH` is set before building:
 ```bash
-export NEXT_PUBLIC_BASE_PATH=/hindsight
-npm run build --workspace=hindsight-control-plane
+docker-compose -f docker/docker-compose/nginx/docker-compose.yml up --build
 ```
 
-### OpenAPI docs show wrong server URL
+**Access:**
+- API docs: http://localhost:8080/hindsight/docs
+- Control Plane: http://localhost:8080/hindsight
+- All under the same `/hindsight` path!
 
-**Problem:** OpenAPI docs say "Server not found" or show wrong URL
+## Why Two Options?
 
-**Solution:** The `root_path` parameter in FastAPI should match your base path. Check that `HINDSIGHT_API_BASE_PATH` is set.
+**Option 1 (API-only)** is simpler and works with the published image because:
+- The API accepts `HINDSIGHT_API_BASE_PATH` at runtime
+- No rebuild needed
 
-### Nginx returns 502 Bad Gateway
+**Option 2 (Full stack)** requires a build because:
+- Next.js `basePath` must be set at **build time** (not runtime)
+- The published image wasn't built with a custom base path
+- You need to rebuild with `NEXT_PUBLIC_BASE_PATH` build arg
 
-**Problem:** Nginx can't reach upstream services
+## Configuration
 
-**Solution:** Check that API and Control Plane are running:
-```bash
-curl http://localhost:8888/hindsight/health  # API direct
-curl http://localhost:3000/hindsight         # Control Plane direct
-```
+### Environment Variables
+
+**For API:**
+- `HINDSIGHT_API_BASE_PATH` - API base path (e.g., `/hindsight`)
+- `HINDSIGHT_API_LLM_PROVIDER` - LLM provider (default: `mock`)
+- `OPENAI_API_KEY` - Your LLM API key (if not using mock)
+
+**For Control Plane:**
+- `NEXT_PUBLIC_BASE_PATH` - Control Plane base path (must match API base path)
+
+### Nginx Configuration
+
+The nginx config routes requests based on path:
+- `/hindsight/docs`, `/hindsight/v1/*`, etc. → API (port 8888)
+- `/hindsight/_next/*` → Control Plane static assets (port 9999)
+- `/hindsight/*` → Control Plane pages (port 9999)
 
 ## Production Considerations
 
 ### HTTPS/TLS
 
-Add SSL configuration to Nginx:
+Add SSL configuration to nginx:
 
 ```nginx
 server {
@@ -144,37 +172,68 @@ server {
 }
 ```
 
-### Security Headers
-
-Add security headers to Nginx:
-
-```nginx
-add_header X-Frame-Options "SAMEORIGIN" always;
-add_header X-Content-Type-Options "nosniff" always;
-add_header X-XSS-Protection "1; mode=block" always;
-add_header Referrer-Policy "no-referrer-when-downgrade" always;
-```
-
 ### Rate Limiting
 
-Protect your API from abuse:
+Protect your API:
 
 ```nginx
 limit_req_zone $binary_remote_addr zone=api:10m rate=10r/s;
 
-location /hindsight/ {
+location /hindsight/v1/ {
     limit_req zone=api burst=20 nodelay;
     # ... rest of config
 }
 ```
 
-### Monitoring
+### External PostgreSQL
 
-Enable access logs for monitoring:
+For production, use external PostgreSQL instead of embedded pg0:
 
-```nginx
-access_log /var/log/nginx/hindsight-access.log combined;
-error_log /var/log/nginx/hindsight-error.log warn;
+```yaml
+services:
+  postgres:
+    image: ankane/pgvector:latest
+    environment:
+      POSTGRES_DB: hindsight
+      POSTGRES_USER: hindsight
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  hindsight:
+    environment:
+      HINDSIGHT_API_DATABASE_URL: postgresql://hindsight:${POSTGRES_PASSWORD}@postgres:5432/hindsight
+```
+
+## Troubleshooting
+
+### API returns 404
+
+**Problem:** API endpoints return 404
+
+**Solution:** Ensure `HINDSIGHT_API_BASE_PATH` matches nginx location:
+```bash
+# If nginx uses /hindsight/
+export HINDSIGHT_API_BASE_PATH=/hindsight
+```
+
+### Control Plane assets fail to load
+
+**Problem:** Browser shows 404 for JS/CSS files
+
+**Solution:** Make sure you built with `NEXT_PUBLIC_BASE_PATH`:
+```bash
+docker-compose up --build  # Don't forget --build!
+```
+
+### Nginx 502 Bad Gateway
+
+**Problem:** Nginx can't reach services
+
+**Solution:** Check containers are healthy:
+```bash
+docker-compose ps
+docker-compose logs hindsight
 ```
 
 ## Alternative Reverse Proxies
@@ -188,26 +247,24 @@ http:
     hindsight:
       rule: "PathPrefix(`/hindsight`)"
       service: hindsight
-
   services:
     hindsight:
       loadBalancer:
         servers:
-          - url: "http://api:8888"
+          - url: "http://hindsight:8888"
 ```
 
 **Caddy:**
 ```caddyfile
 example.com {
     handle /hindsight/* {
-        reverse_proxy localhost:8888
+        reverse_proxy hindsight:8888
     }
 }
 ```
 
-**HAProxy:**
-```haproxy
-backend hindsight
-    server api localhost:8888
-    reqrep ^([^\ :]*)\ /hindsight/(.*) \1\ /\2
-```
+## Learn More
+
+- [Hindsight Documentation](https://github.com/vectorize-io/hindsight/tree/main/hindsight-docs)
+- [Next.js basePath](https://nextjs.org/docs/app/api-reference/config/next-config-js/basePath)
+- [Nginx Reverse Proxy](https://docs.nginx.com/nginx/admin-guide/web-server/reverse-proxy/)
