@@ -52,6 +52,11 @@ def check_docker_available() -> bool:
 
 def check_docker_compose_available() -> bool:
     """Check if docker-compose is available."""
+    # Try modern docker compose plugin first
+    result = run_command(["docker", "compose", "version"])
+    if result.returncode == 0:
+        return True
+    # Fall back to legacy docker-compose
     result = run_command(["docker-compose", "--version"])
     return result.returncode == 0
 
@@ -150,14 +155,14 @@ class DockerComposeStack:
 
         # Pull images first (but don't fail if it doesn't work)
         run_command(
-            ["docker-compose", "-f", str(self.compose_file), "-p", self.project_name, "pull"],
+            ["docker", "compose", "-f", str(self.compose_file), "-p", self.project_name, "pull"],
             cwd=self.compose_file.parent,
             env=self.env,
         )
 
         # Start services
         result = run_command(
-            ["docker-compose", "-f", str(self.compose_file), "-p", self.project_name, "up", "-d", "--build"],
+            ["docker", "compose", "-f", str(self.compose_file), "-p", self.project_name, "up", "-d", "--build"],
             cwd=self.compose_file.parent,
             env=self.env,
         )
@@ -170,7 +175,7 @@ class DockerComposeStack:
         start_time = time.time()
         while time.time() - start_time < timeout:
             result = run_command(
-                ["docker-compose", "-f", str(self.compose_file), "-p", self.project_name, "ps", "--format", "json"],
+                ["docker", "compose", "-f", str(self.compose_file), "-p", self.project_name, "ps", "--format", "json"],
                 cwd=self.compose_file.parent,
                 env=self.env,
             )
@@ -189,7 +194,7 @@ class DockerComposeStack:
     def show_logs(self):
         """Show docker-compose logs."""
         result = run_command(
-            ["docker-compose", "-f", str(self.compose_file), "-p", self.project_name, "logs", "--tail=100"],
+            ["docker", "compose", "-f", str(self.compose_file), "-p", self.project_name, "logs", "--tail=100"],
             cwd=self.compose_file.parent,
             env=self.env,
         )
@@ -199,7 +204,7 @@ class DockerComposeStack:
         """Stop and remove the docker-compose stack."""
         print(f"Stopping docker-compose stack: {self.compose_file.name}")
         result = run_command(
-            ["docker-compose", "-f", str(self.compose_file), "-p", self.project_name, "down", "-v"],
+            ["docker", "compose", "-f", str(self.compose_file), "-p", self.project_name, "down", "-v"],
             cwd=self.compose_file.parent,
             env=self.env,
         )
