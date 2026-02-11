@@ -1,0 +1,105 @@
+version: '3.8'
+
+# Hindsight deployment with Nginx reverse proxy and base path
+#
+# This example deploys Hindsight under the path /hindsight with:
+# - PostgreSQL database
+# - Hindsight (standalone image with API + Control Plane)
+# - Nginx reverse proxy
+#
+# Prerequisites:
+#   1. Build the Hindsight Docker image:
+#      docker build -t hindsight:latest -f docker/standalone/Dockerfile .
+#
+#   2. Set your LLM API key:
+#      export OPENAI_API_KEY=your-key-here
+#      # or set ANTHROPIC_API_KEY, etc. depending on your provider
+#
+# Usage:
+#   docker-compose -f docker/docker-compose/nginx/docker-compose.yml up
+#
+# Access:
+#   API docs: http://localhost:8080/hindsight/docs
+#   Control Plane: http://localhost:8080/hindsight/
+
+services:
+  # PostgreSQL database with pgvector
+  postgres:
+    image: ankane/pgvector:latest
+    environment:
+      POSTGRES_DB: hindsight
+      POSTGRES_USER: hindsight
+      POSTGRES_PASSWORD: hindsight_dev
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U hindsight"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - hindsight
+
+  # Hindsight (API + Control Plane)
+  hindsight:
+    image: hindsight:latest
+    environment:
+      # Database
+      HINDSIGHT_API_DATABASE_URL: postgresql://hindsight:hindsight_dev@postgres:5432/hindsight
+
+      # Base path configuration (must match Nginx location)
+      HINDSIGHT_API_BASE_PATH: /hindsight
+      NEXT_PUBLIC_BASE_PATH: /hindsight
+
+      # LLM configuration - customize for your provider
+      # OpenAI (default):
+      HINDSIGHT_API_LLM_PROVIDER: openai
+      HINDSIGHT_API_LLM_API_KEY: ${OPENAI_API_KEY}
+      HINDSIGHT_API_LLM_MODEL: gpt-4o-mini
+
+      # Alternative providers (uncomment and set appropriate API key):
+      # HINDSIGHT_API_LLM_PROVIDER: anthropic
+      # HINDSIGHT_API_LLM_API_KEY: ${ANTHROPIC_API_KEY}
+      # HINDSIGHT_API_LLM_MODEL: claude-sonnet-4-20250514
+
+      # Server config
+      HINDSIGHT_API_HOST: 0.0.0.0
+      HINDSIGHT_API_PORT: 8888
+      HINDSIGHT_API_LOG_LEVEL: info
+
+      # Control Plane config
+      HINDSIGHT_CP_DATAPLANE_API_URL: http://localhost:8888
+    ports:
+      # Expose directly for debugging (optional - not needed for reverse proxy)
+      # - "8888:8888"  # API
+      # - "9999:9999"  # Control Plane
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8888/hindsight/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    networks:
+      - hindsight
+
+  # Nginx reverse proxy
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "8080:80"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      hindsight:
+        condition: service_healthy
+    networks:
+      - hindsight
+
+volumes:
+  postgres_data:
+
+networks:
+  hindsight:
