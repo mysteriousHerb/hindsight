@@ -1,6 +1,6 @@
-# Docker Compose Examples for Base Path Deployment
+# Nginx Reverse Proxy Deployment
 
-This directory contains Docker Compose examples and Nginx configurations for deploying Hindsight behind a reverse proxy with path-based routing (subpath deployment).
+This directory contains a production-ready Docker Compose setup for deploying Hindsight behind an Nginx reverse proxy with path-based routing (subpath deployment).
 
 ## Use Case
 
@@ -12,41 +12,31 @@ Deploy Hindsight under a subpath (e.g., `https://example.com/hindsight/`) instea
 
 ## Quick Start
 
-### 1. Configure Environment Variables
+### 1. Build the Docker Image
 
 ```bash
-export HINDSIGHT_API_BASE_PATH=/hindsight
-export NEXT_PUBLIC_BASE_PATH=/hindsight
+# From repo root
+docker build -t hindsight:latest -f docker/standalone/Dockerfile .
 ```
 
-### 2. Start Services
+### 2. Set Your LLM API Key
 
 ```bash
-# Start API
-./scripts/dev/start-api.sh
+export OPENAI_API_KEY=your-key-here
 
-# Start Control Plane (in another terminal)
-./scripts/dev/start-control-plane.sh
+# Or for other providers:
+# export ANTHROPIC_API_KEY=your-key-here
 ```
 
-### 3. Configure Nginx
-
-Choose the configuration that matches your deployment:
-- **`simple.conf`** - API only (most common)
-- **`api-and-control-plane.conf`** - API + Control Plane together
-- **`docker-compose.yml`** - Complete Docker Compose setup with Nginx
-
-### 4. Start Nginx
+### 3. Start the Stack
 
 ```bash
-# Test the configuration first
-nginx -t -c $(pwd)/docker/compose-examples/simple.conf
-
-# Start nginx
-nginx -c $(pwd)/docker/compose-examples/simple.conf
+docker-compose -f docker/docker-compose/nginx/docker-compose.yml up
 ```
 
-### 5. Verify
+### 4. Verify
+
+Access Hindsight at `http://localhost:8080/hindsight/`:
 
 ```bash
 # API health check
@@ -55,7 +45,7 @@ curl http://localhost:8080/hindsight/health
 # OpenAPI docs
 open http://localhost:8080/hindsight/docs
 
-# Control Plane (if using api-and-control-plane.conf)
+# Control Plane UI
 open http://localhost:8080/hindsight/
 ```
 
