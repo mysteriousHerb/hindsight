@@ -405,7 +405,9 @@ impl ApiClient {
         _verbose: bool,
     ) -> Result<types::BankConfigResponse> {
         self.runtime.block_on(async {
-            let request = types::BankConfigUpdate { updates };
+            // Convert HashMap to serde_json::Map
+            let updates_map: serde_json::Map<String, serde_json::Value> = updates.into_iter().collect();
+            let request = types::BankConfigUpdate { updates: updates_map };
             let response = self.client.update_bank_config(bank_id, None, &request).await?;
             Ok(response.into_inner())
         })

@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use crate::api::ApiClient;
 use crate::output::{self, OutputFormat};
 use crate::ui;
@@ -657,7 +657,7 @@ pub fn clear_observations(
 }
 
 pub fn config(
-    client: &api::Client,
+    client: &ApiClient,
     bank_id: &str,
     overrides_only: bool,
     verbose: bool,
@@ -709,7 +709,7 @@ pub fn config(
 }
 
 pub fn set_config(
-    client: &api::Client,
+    client: &ApiClient,
     bank_id: &str,
     llm_provider: Option<String>,
     llm_model: Option<String>,
@@ -736,7 +736,7 @@ pub fn set_config(
     }
 
     if updates.is_empty() {
-        return Err(errors::Error::Generic("No config updates provided. Use --llm-provider, --llm-model, --llm-api-key, or --llm-base-url".to_string()));
+        return Err(anyhow!("No config updates provided. Use --llm-provider, --llm-model, --llm-api-key, or --llm-base-url".to_string()));
     }
 
     let spinner = if output_format == OutputFormat::Pretty {
@@ -769,18 +769,20 @@ pub fn set_config(
 }
 
 pub fn reset_config(
-    client: &api::Client,
+    client: &ApiClient,
     bank_id: &str,
     yes: bool,
     verbose: bool,
     output_format: OutputFormat,
 ) -> Result<()> {
     if !yes && output_format == OutputFormat::Pretty {
-        if !ui::confirm(&format!(
+        let confirmed = ui::prompt_confirmation(&format!(
             "Reset all configuration overrides for bank '{}'?",
             bank_id
-        )) {
-            ui::print_info("Cancelled.");
+        ))?;
+
+        if !confirmed {
+            ui::print_info("Operation cancelled");
             return Ok(());
         }
     }
