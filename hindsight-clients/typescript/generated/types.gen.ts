@@ -862,6 +862,12 @@ export type FeaturesInfo = {
    * Whether the background worker is enabled
    */
   worker: boolean;
+  /**
+   * Bank Config Api
+   *
+   * Whether per-bank configuration API is enabled
+   */
+  bank_config_api: boolean;
 };
 
 /**

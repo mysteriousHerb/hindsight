@@ -29,7 +29,8 @@ class FeaturesInfo(BaseModel):
     observations: StrictBool = Field(description="Whether observations (auto-consolidation) are enabled")
     mcp: StrictBool = Field(description="Whether MCP (Model Context Protocol) server is enabled")
     worker: StrictBool = Field(description="Whether the background worker is enabled")
-    __properties: ClassVar[List[str]] = ["observations", "mcp", "worker"]
+    bank_config_api: StrictBool = Field(description="Whether per-bank configuration API is enabled")
+    __properties: ClassVar[List[str]] = ["observations", "mcp", "worker", "bank_config_api"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -84,7 +85,8 @@ class FeaturesInfo(BaseModel):
         _obj = cls.model_validate({
             "observations": obj.get("observations"),
             "mcp": obj.get("mcp"),
-            "worker": obj.get("worker")
+            "worker": obj.get("worker"),
+            "bank_config_api": obj.get("bank_config_api")
         })
         return _obj
 

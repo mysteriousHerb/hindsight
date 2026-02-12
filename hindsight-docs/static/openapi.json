@@ -4490,13 +4490,19 @@
             "type": "boolean",
             "title": "Worker",
             "description": "Whether the background worker is enabled"
+          },
+          "bank_config_api": {
+            "type": "boolean",
+            "title": "Bank Config Api",
+            "description": "Whether per-bank configuration API is enabled"
           }
         },
         "type": "object",
         "required": [
           "observations",
           "mcp",
-          "worker"
+          "worker",
+          "bank_config_api"
         ],
         "title": "FeaturesInfo",
         "description": "Feature flags indicating which capabilities are enabled."
@@ -6506,6 +6512,7 @@
         "example": {
           "api_version": "0.4.0",
           "features": {
+            "bank_config_api": false,
             "mcp": true,
             "observations": false,
             "worker": true
