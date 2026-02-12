@@ -941,7 +941,8 @@ so the algorithm learns to box out. See you next week!
                     event_date=datetime(2024, 11, 13),
                     llm_config=llm_config,
                     agent_name="Marcus",
-                    context=context
+                    context=context,
+                    config=_get_raw_config(),
                 )
 
                 assert len(facts) > 0, "Should extract at least one fact"
