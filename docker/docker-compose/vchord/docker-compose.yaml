@@ -61,13 +61,8 @@ services:
       - hindsight-net
 
   hindsight:
-    build:
-      context: ../../..
-      dockerfile: docker/standalone/Dockerfile
-    image: hindsight:local
+    image: ghcr.io/vectorize-io/hindsight:${HINDSIGHT_VERSION:-latest}
     container_name: hindsight-app
-    env_file:
-      - ../../../.env
     ports:
       - "8888:8888"
       - "9999:9999"
