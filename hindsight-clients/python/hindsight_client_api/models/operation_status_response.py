@@ -19,6 +19,7 @@ import json
 
 from pydantic import BaseModel, ConfigDict, StrictStr, field_validator
 from typing import Any, ClassVar, Dict, List, Optional
+from hindsight_client_api.models.child_operation_status import ChildOperationStatus
 from typing import Optional, Set
 from typing_extensions import Self
 
@@ -34,7 +35,7 @@ class OperationStatusResponse(BaseModel):
     completed_at: Optional[StrictStr] = None
     error_message: Optional[StrictStr] = None
     result_metadata: Optional[Dict[str, Any]] = None
-    child_operations: Optional[List[Dict[str, Any]]] = None
+    child_operations: Optional[List[ChildOperationStatus]] = None
     __properties: ClassVar[List[str]] = ["operation_id", "status", "operation_type", "created_at", "updated_at", "completed_at", "error_message", "result_metadata", "child_operations"]
 
     @field_validator('status')
@@ -83,6 +84,13 @@ class OperationStatusResponse(BaseModel):
             exclude=excluded_fields,
             exclude_none=True,
         )
+        # override the default output from pydantic by calling `to_dict()` of each item in child_operations (list)
+        _items = []
+        if self.child_operations:
+            for _item_child_operations in self.child_operations:
+                if _item_child_operations:
+                    _items.append(_item_child_operations.to_dict())
+            _dict['child_operations'] = _items
         # set to None if operation_type (nullable) is None
         # and model_fields_set contains the field
         if self.operation_type is None and "operation_type" in self.model_fields_set:
@@ -138,7 +146,7 @@ class OperationStatusResponse(BaseModel):
             "completed_at": obj.get("completed_at"),
             "error_message": obj.get("error_message"),
             "result_metadata": obj.get("result_metadata"),
-            "child_operations": obj.get("child_operations")
+            "child_operations": [ChildOperationStatus.from_dict(_item) for _item in obj["child_operations"]] if obj.get("child_operations") is not None else None
         })
         return _obj
 

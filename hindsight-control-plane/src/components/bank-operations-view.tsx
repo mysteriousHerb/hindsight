@@ -31,6 +31,33 @@ interface Operation {
   error_message: string | null;
 }
 
+interface ChildOperationStatus {
+  operation_id: string;
+  status: string;
+  sub_batch_index: number | null;
+  items_count: number | null;
+  error_message: string | null;
+}
+
+interface OperationDetails {
+  operation_id?: string;
+  status?: string;
+  operation_type?: string;
+  created_at?: string | null;
+  updated_at?: string | null;
+  completed_at?: string | null;
+  error_message?: string | null;
+  result_metadata?: {
+    items_count?: number;
+    total_tokens?: number;
+    num_sub_batches?: number;
+    is_parent?: boolean;
+    [key: string]: any;
+  };
+  child_operations?: ChildOperationStatus[];
+  error?: string; // For error states when loading fails
+}
+
 export function BankOperationsView() {
   const { currentBank } = useBank();
   const [operations, setOperations] = useState<Operation[]>([]);
@@ -40,7 +67,7 @@ export function BankOperationsView() {
   const [offset, setOffset] = useState(0);
   const [cancellingOpId, setCancellingOpId] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const [selectedOperation, setSelectedOperation] = useState<any | null>(null);
+  const [selectedOperation, setSelectedOperation] = useState<OperationDetails | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [loadingDetails, setLoadingDetails] = useState(false);
 
@@ -393,7 +420,7 @@ export function BankOperationsView() {
                               </TableRow>
                             </TableHeader>
                             <TableBody>
-                              {selectedOperation.child_operations.map((child: any) => (
+                              {selectedOperation.child_operations.map((child) => (
                                 <TableRow key={child.operation_id}>
                                   <TableCell className="text-sm">{child.sub_batch_index}</TableCell>
                                   <TableCell className="font-mono text-xs text-muted-foreground">

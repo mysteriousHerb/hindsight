@@ -844,7 +844,11 @@ class MemoryEngine(MemoryEngineInterface):
             logger.error(f"Failed to delete async operation record {operation_id}: {e}")
 
     async def _mark_operation_failed(self, operation_id: str, error_message: str, error_traceback: str):
-        """Helper to mark an operation as failed in the database."""
+        """Helper to mark an operation as failed in the database.
+
+        Also checks if this is a child operation and updates the parent if all siblings are done.
+        Uses a single transaction to avoid race conditions when multiple children fail simultaneously.
+        """
         try:
             pool = await self._get_pool()
             # Truncate error message to avoid extremely long strings
@@ -852,35 +856,161 @@ class MemoryEngine(MemoryEngineInterface):
             truncated_error = full_error[:5000] if len(full_error) > 5000 else full_error
 
             async with acquire_with_retry(pool) as conn:
-                await conn.execute(
-                    f"""
-                    UPDATE {fq_table("async_operations")}
-                    SET status = 'failed', error_message = $2, updated_at = NOW()
-                    WHERE operation_id = $1
-                    """,
-                    uuid.UUID(operation_id),
-                    truncated_error,
-                )
-            logger.info(f"Marked async operation as failed: {operation_id}")
+                async with conn.transaction():
+                    # Mark this operation as failed
+                    await conn.execute(
+                        f"""
+                        UPDATE {fq_table("async_operations")}
+                        SET status = 'failed', error_message = $2, updated_at = NOW()
+                        WHERE operation_id = $1
+                        """,
+                        uuid.UUID(operation_id),
+                        truncated_error,
+                    )
+                    logger.info(f"Marked async operation as failed: {operation_id}")
+
+                    # Check if this is a child operation and update parent if all siblings are done
+                    # This happens in the same transaction after the child status is updated
+                    await self._maybe_update_parent_operation(operation_id, conn)
         except Exception as e:
             logger.error(f"Failed to mark operation as failed {operation_id}: {e}")
 
     async def _mark_operation_completed(self, operation_id: str):
-        """Helper to mark an operation as completed in the database."""
+        """Helper to mark an operation as completed in the database.
+
+        Also checks if this is a child operation and updates the parent if all siblings are done.
+        Uses a single transaction to avoid race conditions when multiple children complete simultaneously.
+        """
         try:
             pool = await self._get_pool()
             async with acquire_with_retry(pool) as conn:
+                async with conn.transaction():
+                    # Mark this operation as completed
+                    await conn.execute(
+                        f"""
+                        UPDATE {fq_table("async_operations")}
+                        SET status = 'completed', updated_at = NOW(), completed_at = NOW()
+                        WHERE operation_id = $1
+                        """,
+                        uuid.UUID(operation_id),
+                    )
+                    logger.info(f"Marked async operation as completed: {operation_id}")
+
+                    # Check if this is a child operation and update parent if all siblings are done
+                    # This happens in the same transaction after the child status is updated
+                    await self._maybe_update_parent_operation(operation_id, conn)
+        except Exception as e:
+            logger.error(f"Failed to mark operation as completed {operation_id}: {e}")
+
+    async def _maybe_update_parent_operation(self, child_operation_id: str, conn):
+        """Check if this is a child operation and update parent status if all siblings are done.
+
+        Must be called within an active transaction that has already updated the child's status.
+        Uses SELECT FOR UPDATE to lock the parent and prevent race conditions.
+
+        Args:
+            child_operation_id: The operation ID that just completed or failed
+            conn: Database connection with an active transaction
+        """
+        try:
+            # Get this operation's metadata to check if it has a parent
+            row = await conn.fetchrow(
+                f"""
+                SELECT result_metadata, bank_id
+                FROM {fq_table("async_operations")}
+                WHERE operation_id = $1
+                """,
+                uuid.UUID(child_operation_id),
+            )
+
+            if not row:
+                return
+
+            result_metadata = json.loads(row["result_metadata"]) if row["result_metadata"] else {}
+            parent_operation_id = result_metadata.get("parent_operation_id")
+
+            if not parent_operation_id:
+                # Not a child operation
+                return
+
+            bank_id = row["bank_id"]
+
+            # Lock the parent operation to prevent concurrent updates from other children
+            # Use FOR UPDATE to ensure only one child can update the parent at a time
+            parent_row = await conn.fetchrow(
+                f"""
+                SELECT operation_id
+                FROM {fq_table("async_operations")}
+                WHERE operation_id = $1 AND bank_id = $2
+                FOR UPDATE
+                """,
+                uuid.UUID(parent_operation_id),
+                bank_id,
+            )
+
+            if not parent_row:
+                # Parent doesn't exist (shouldn't happen)
+                return
+
+            # Get all sibling operations (including this one)
+            # This query runs in the same transaction, so it sees the current child's updated status
+            siblings = await conn.fetch(
+                f"""
+                SELECT status
+                FROM {fq_table("async_operations")}
+                WHERE bank_id = $1
+                AND result_metadata::jsonb @> $2::jsonb
+                """,
+                bank_id,
+                json.dumps({"parent_operation_id": parent_operation_id}),
+            )
+
+            if not siblings:
+                return
+
+            # Check if all siblings are done (completed or failed)
+            all_completed = all(sib["status"] == "completed" for sib in siblings)
+            any_failed = any(sib["status"] == "failed" for sib in siblings)
+            all_done = all(sib["status"] in ("completed", "failed") for sib in siblings)
+
+            if not all_done:
+                # Some siblings still pending/processing
+                return
+
+            # All siblings are done - update parent status
+            if any_failed:
+                new_status = "failed"
+                # Set parent error message to indicate child failure
                 await conn.execute(
                     f"""
                     UPDATE {fq_table("async_operations")}
-                    SET status = 'completed', updated_at = NOW(), completed_at = NOW()
+                    SET status = $2, error_message = $3, updated_at = NOW()
                     WHERE operation_id = $1
                     """,
-                    uuid.UUID(operation_id),
+                    uuid.UUID(parent_operation_id),
+                    new_status,
+                    "One or more sub-batches failed",
                 )
-            logger.info(f"Marked async operation as completed: {operation_id}")
+            elif all_completed:
+                new_status = "completed"
+                await conn.execute(
+                    f"""
+                    UPDATE {fq_table("async_operations")}
+                    SET status = $2, updated_at = NOW(), completed_at = NOW()
+                    WHERE operation_id = $1
+                    """,
+                    uuid.UUID(parent_operation_id),
+                    new_status,
+                )
+
+            logger.info(
+                f"Updated parent operation {parent_operation_id} to status '{new_status}' (all children done)"
+            )
+
         except Exception as e:
-            logger.error(f"Failed to mark operation as completed {operation_id}: {e}")
+            logger.error(f"Failed to update parent operation for child {child_operation_id}: {e}")
+            # Re-raise to rollback the transaction
+            raise
 
     async def initialize(self):
         """Initialize the connection pool, models, and background workers.
@@ -5509,43 +5639,13 @@ class MemoryEngine(MemoryEngineInterface):
                 offset,
             )
 
-            # Build operation list, aggregating status for parent operations
+            # Build operation list using status from database
+            # Parent operations have their status updated when all children complete/fail
             operation_list = []
             for row in operations:
-                result_metadata = json.loads(row["result_metadata"]) if row["result_metadata"] else {}
-                is_parent = result_metadata.get("is_parent", False)
-
-                # For parent operations, aggregate child statuses
-                if is_parent:
-                    # Query child operations to get aggregated status
-                    child_rows = await conn.fetch(
-                        f"""
-                        SELECT status
-                        FROM {fq_table("async_operations")}
-                        WHERE bank_id = $1
-                        AND result_metadata::jsonb @> $2::jsonb
-                        """,
-                        bank_id,
-                        json.dumps({"parent_operation_id": str(row["operation_id"])}),
-                    )
-
-                    # Aggregate child statuses
-                    if child_rows:
-                        all_completed = all(child["status"] == "completed" for child in child_rows)
-                        any_failed = any(child["status"] == "failed" for child in child_rows)
-
-                        if any_failed:
-                            aggregated_status = "failed"
-                        elif all_completed:
-                            aggregated_status = "completed"
-                        else:
-                            aggregated_status = "pending"
-                    else:
-                        # No children yet (shouldn't happen)
-                        aggregated_status = "pending"
-                else:
-                    # Regular operation - use DB status
-                    aggregated_status = "pending" if row["status"] in ("pending", "processing") else row["status"]
+                # Map DB status to API status (pending includes processing)
+                db_status = row["status"]
+                api_status = "pending" if db_status in ("pending", "processing") else db_status
 
                 operation_list.append(
                     {
@@ -5554,7 +5654,7 @@ class MemoryEngine(MemoryEngineInterface):
                         "items_count": 0,
                         "document_id": None,
                         "created_at": row["created_at"].isoformat(),
-                        "status": aggregated_status,
+                        "status": api_status,
                         "error_message": row["error_message"],
                     }
                 )
@@ -5573,13 +5673,10 @@ class MemoryEngine(MemoryEngineInterface):
     ) -> dict[str, Any]:
         """Get the status of a specific async operation.
 
-        For parent operations (batch_retain with sub-batches), aggregates child operation statuses:
-        - status = "completed" only if all children are completed
-        - status = "failed" if any child failed
-        - status = "pending" otherwise (includes "processing" children)
+        For parent operations, the status is automatically updated in the database when all children complete/fail.
 
         Returns:
-            - status: "pending", "completed", or "failed"
+            - status: "pending", "completed", or "failed" (from database)
             - updated_at: last update timestamp
             - completed_at: completion timestamp (if completed)
             - child_operations: (for parent operations) list of child operation statuses
@@ -5605,11 +5702,16 @@ class MemoryEngine(MemoryEngineInterface):
                 result_metadata = json.loads(row["result_metadata"]) if row["result_metadata"] else {}
                 is_parent = result_metadata.get("is_parent", False)
 
+                # Use status from database (parent status is updated when all children complete/fail)
+                db_status = row["status"]
+                api_status = "pending" if db_status in ("pending", "processing") else db_status
+
+                # For parent operations, include child operations list
                 if is_parent:
                     # Query child operations
                     child_rows = await conn.fetch(
                         f"""
-                        SELECT operation_id, status, error_message, result_metadata, updated_at, completed_at
+                        SELECT operation_id, status, error_message, result_metadata
                         FROM {fq_table("async_operations")}
                         WHERE bank_id = $1
                         AND result_metadata::jsonb @> $2::jsonb
@@ -5619,18 +5721,17 @@ class MemoryEngine(MemoryEngineInterface):
                         json.dumps({"parent_operation_id": operation_id}),
                     )
 
-                    # Aggregate child statuses
+                    # Build child operations list and check if parent status needs updating
                     child_statuses = []
-                    all_completed = True
+                    all_done = True
                     any_failed = False
-                    latest_updated_at = row["updated_at"]
-                    latest_completed_at = None
+                    all_completed = True
 
                     for child_row in child_rows:
-                        child_status = child_row["status"]
                         child_metadata = (
                             json.loads(child_row["result_metadata"]) if child_row["result_metadata"] else {}
                         )
+                        child_status = child_row["status"]
 
                         child_statuses.append(
                             {
@@ -5642,41 +5743,43 @@ class MemoryEngine(MemoryEngineInterface):
                             }
                         )
 
-                        if child_status != "completed":
-                            all_completed = False
+                        if child_status not in ("completed", "failed"):
+                            all_done = False
                         if child_status == "failed":
                             any_failed = True
+                        if child_status != "completed":
+                            all_completed = False
 
-                    # Determine aggregated status
-                    if any_failed:
-                        aggregated_status = "failed"
-                    elif all_completed and len(child_rows) > 0:
-                        aggregated_status = "completed"
-                        # Use the latest completed_at from children
-                        # (we don't update parent's completed_at in DB, but we can show it in API)
-                        if all_completed:
-                            latest_completed_at = max(
-                                (child_row["updated_at"] for child_row in child_rows if child_row["updated_at"]),
-                                default=None,
-                            )
-                    else:
-                        aggregated_status = "pending"
+                    # Self-healing: if parent status is out of sync with children, update it
+                    if all_done and api_status == "pending":
+                        correct_status = "failed" if any_failed else "completed"
+                        logger.warning(
+                            f"Parent operation {operation_id} status out of sync (DB: pending, should be: {correct_status}). Fixing."
+                        )
+                        await conn.execute(
+                            f"""
+                            UPDATE {fq_table("async_operations")}
+                            SET status = $2, updated_at = NOW(), completed_at = NOW()
+                            WHERE operation_id = $1
+                            """,
+                            op_uuid,
+                            correct_status,
+                        )
+                        api_status = correct_status
 
                     return {
                         "operation_id": operation_id,
-                        "status": aggregated_status,
+                        "status": api_status,
                         "operation_type": row["operation_type"],
                         "created_at": row["created_at"].isoformat() if row["created_at"] else None,
-                        "updated_at": latest_updated_at.isoformat() if latest_updated_at else None,
-                        "completed_at": latest_completed_at.isoformat() if latest_completed_at else None,
+                        "updated_at": row["updated_at"].isoformat() if row["updated_at"] else None,
+                        "completed_at": row["completed_at"].isoformat() if row["completed_at"] else None,
                         "error_message": row["error_message"],
                         "result_metadata": result_metadata,
                         "child_operations": child_statuses,
                     }
                 else:
                     # Regular operation (not a parent)
-                    db_status = row["status"]
-                    api_status = "pending" if db_status in ("pending", "processing") else db_status
                     return {
                         "operation_id": operation_id,
                         "status": api_status,

@@ -3605,6 +3605,58 @@
           "success": true
         }
       },
+      "ChildOperationStatus": {
+        "properties": {
+          "operation_id": {
+            "type": "string",
+            "title": "Operation Id"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "sub_batch_index": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sub Batch Index"
+          },
+          "items_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Items Count"
+          },
+          "error_message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Message"
+          }
+        },
+        "type": "object",
+        "required": [
+          "operation_id",
+          "status"
+        ],
+        "title": "ChildOperationStatus",
+        "description": "Status of a child operation (for batch operations)."
+      },
       "ChunkData": {
         "properties": {
           "id": {
@@ -5168,8 +5220,7 @@
             "anyOf": [
               {
                 "items": {
-                  "additionalProperties": true,
-                  "type": "object"
+                  "$ref": "#/components/schemas/ChildOperationStatus"
                 },
                 "type": "array"
               },
