@@ -1003,9 +1003,7 @@ class MemoryEngine(MemoryEngineInterface):
                     new_status,
                 )
 
-            logger.info(
-                f"Updated parent operation {parent_operation_id} to status '{new_status}' (all children done)"
-            )
+            logger.info(f"Updated parent operation {parent_operation_id} to status '{new_status}' (all children done)")
 
         except Exception as e:
             logger.error(f"Failed to update parent operation for child {child_operation_id}: {e}")
