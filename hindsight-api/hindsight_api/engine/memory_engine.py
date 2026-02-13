@@ -2449,6 +2449,22 @@ class MemoryEngine(MemoryEngineInterface):
             filtered_ids = {d["id"] for d in filtered_dicts}
             top_scored = [sr for sr in top_scored if sr.id in filtered_ids]
 
+            # Step 6.5: Reorder chunks to match the final filtered facts (when max_tokens > 0)
+            # For backward compatibility: when max_tokens > 0, chunks should only include those from filtered facts
+            # When max_tokens = 0: keep all fetched chunks (new independent behavior)
+            if chunks_dict and max_tokens > 0 and top_scored:
+                # Collect chunk_ids from filtered facts in order
+                filtered_chunk_ids_ordered = []
+                seen_chunk_ids = set()
+                for sr in top_scored:
+                    chunk_id = sr.retrieval.chunk_id
+                    if chunk_id and chunk_id in chunks_dict and chunk_id not in seen_chunk_ids:
+                        filtered_chunk_ids_ordered.append(chunk_id)
+                        seen_chunk_ids.add(chunk_id)
+
+                # Rebuild chunks_dict in the correct order (only include chunks from filtered facts)
+                chunks_dict = {chunk_id: chunks_dict[chunk_id] for chunk_id in filtered_chunk_ids_ordered}
+
             step_duration = time.time() - step_start
             log_buffer.append(
                 f"  [6] Token filtering: {len(top_scored)} results, {total_tokens}/{max_tokens} tokens in {step_duration:.3f}s"
