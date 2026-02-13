@@ -2359,15 +2359,111 @@ class MemoryEngine(MemoryEngineInterface):
             top_scored = scored_results[:rerank_limit]
             log_buffer.append(f"  [5] Truncated to top {len(top_scored)} results")
 
-            # Step 5.5: Fetch chunks BEFORE token filtering (chunks are independent of max_tokens)
-            # This allows max_tokens=0 to still return chunks based on top-scored results
-            chunks_dict = None
-            total_chunk_tokens = 0
-            if include_chunks and top_scored:
+            # Step 5.5: Pre-fetch chunks when max_tokens=0 (independent chunks feature)
+            # When max_tokens > 0, chunks will be fetched AFTER token filtering for backward compat
+            chunks_dict_prefetched = None
+            total_chunk_tokens_prefetched = 0
+            if include_chunks and max_tokens == 0 and top_scored:
                 from .response_models import ChunkInfo
 
                 # Collect chunk_ids in order of fact relevance (preserving order from top_scored)
                 # Use a list to maintain order, but track seen chunks to avoid duplicates
+                chunk_ids_ordered = []
+                seen_chunk_ids = set()
+                for sr in top_scored:
+                    chunk_id = sr.retrieval.chunk_id
+                    if chunk_id and chunk_id not in seen_chunk_ids:
+                        chunk_ids_ordered.append(chunk_id)
+                        seen_chunk_ids.add(chunk_id)
+
+                if chunk_ids_ordered:
+                    # Estimate batch size based on retain_chunk_size * 2 (rough estimate)
+                    # Chunk sizes vary per document, so we fetch in batches until budget is exhausted
+                    config = get_config()
+                    estimated_batch_size = (max_chunk_tokens // config.retain_chunk_size) * 2
+
+                    chunks_dict_prefetched = {}
+                    encoding = _get_tiktoken_encoding()
+                    chunk_offset = 0
+
+                    # Fetch chunks in batches until we run out of budget or chunks
+                    while chunk_offset < len(chunk_ids_ordered) and total_chunk_tokens_prefetched < max_chunk_tokens:
+                        # Get next batch of chunk IDs
+                        batch_chunk_ids = chunk_ids_ordered[chunk_offset : chunk_offset + estimated_batch_size]
+                        chunk_offset += estimated_batch_size
+
+                        # Fetch chunk data from database
+                        async with acquire_with_retry(pool) as conn:
+                            chunks_rows = await conn.fetch(
+                                f"""
+                                SELECT chunk_id, chunk_text, chunk_index
+                                FROM {fq_table("chunks")}
+                                WHERE chunk_id = ANY($1::text[])
+                                """,
+                                batch_chunk_ids,
+                            )
+
+                        # Create a lookup dict for fast access (preserves order from batch_chunk_ids)
+                        chunks_lookup = {row["chunk_id"]: row for row in chunks_rows}
+
+                        # Process chunks in order, respecting token budget
+                        for chunk_id in batch_chunk_ids:
+                            if chunk_id not in chunks_lookup:
+                                continue
+
+                            row = chunks_lookup[chunk_id]
+                            chunk_text = row["chunk_text"]
+                            chunk_tokens = len(encoding.encode(chunk_text))
+
+                            # Check if adding this chunk would exceed the limit
+                            if total_chunk_tokens_prefetched + chunk_tokens > max_chunk_tokens:
+                                # Truncate the chunk to fit within the remaining budget
+                                remaining_tokens = max_chunk_tokens - total_chunk_tokens_prefetched
+                                if remaining_tokens > 0:
+                                    # Truncate to remaining tokens
+                                    truncated_text = encoding.decode(encoding.encode(chunk_text)[:remaining_tokens])
+                                    chunks_dict_prefetched[chunk_id] = ChunkInfo(
+                                        chunk_text=truncated_text, chunk_index=row["chunk_index"], truncated=True
+                                    )
+                                    total_chunk_tokens_prefetched = max_chunk_tokens
+                                # Budget exhausted - stop fetching more batches
+                                break
+                            else:
+                                chunks_dict_prefetched[chunk_id] = ChunkInfo(
+                                    chunk_text=chunk_text, chunk_index=row["chunk_index"], truncated=False
+                                )
+                                total_chunk_tokens_prefetched += chunk_tokens
+
+                        # If we hit the budget limit in this batch, stop fetching more batches
+                        if total_chunk_tokens_prefetched >= max_chunk_tokens:
+                            break
+
+            # Step 6: Token budget filtering
+            step_start = time.time()
+
+            # Convert to dict for token filtering (backward compatibility)
+            top_dicts = [sr.to_dict() for sr in top_scored]
+            filtered_dicts, total_tokens = self._filter_by_token_budget(top_dicts, max_tokens)
+
+            # Convert back to list of IDs and filter scored_results
+            filtered_ids = {d["id"] for d in filtered_dicts}
+            top_scored = [sr for sr in top_scored if sr.id in filtered_ids]
+
+            # Step 6.5: Fetch chunks AFTER token filtering (when max_tokens > 0)
+            # For backward compatibility: when max_tokens > 0, fetch chunks based on filtered facts
+            # When max_tokens = 0: use pre-fetched chunks (new independent behavior)
+            chunks_dict = None
+            total_chunk_tokens = 0
+
+            if max_tokens == 0 and chunks_dict_prefetched:
+                # Use pre-fetched chunks (fetched before token filtering)
+                chunks_dict = chunks_dict_prefetched
+                total_chunk_tokens = total_chunk_tokens_prefetched
+            elif include_chunks and max_tokens > 0 and top_scored:
+                # Fetch chunks AFTER token filtering (backward compatible behavior)
+                from .response_models import ChunkInfo
+
+                # Collect chunk_ids from filtered facts in order
                 chunk_ids_ordered = []
                 seen_chunk_ids = set()
                 for sr in top_scored:
@@ -2437,33 +2533,6 @@ class MemoryEngine(MemoryEngineInterface):
                         # If we hit the budget limit in this batch, stop fetching more batches
                         if total_chunk_tokens >= max_chunk_tokens:
                             break
-
-            # Step 6: Token budget filtering
-            step_start = time.time()
-
-            # Convert to dict for token filtering (backward compatibility)
-            top_dicts = [sr.to_dict() for sr in top_scored]
-            filtered_dicts, total_tokens = self._filter_by_token_budget(top_dicts, max_tokens)
-
-            # Convert back to list of IDs and filter scored_results
-            filtered_ids = {d["id"] for d in filtered_dicts}
-            top_scored = [sr for sr in top_scored if sr.id in filtered_ids]
-
-            # Step 6.5: Reorder chunks to match the final filtered facts (when max_tokens > 0)
-            # For backward compatibility: when max_tokens > 0, chunks should only include those from filtered facts
-            # When max_tokens = 0: keep all fetched chunks (new independent behavior)
-            if chunks_dict and max_tokens > 0 and top_scored:
-                # Collect chunk_ids from filtered facts in order
-                filtered_chunk_ids_ordered = []
-                seen_chunk_ids = set()
-                for sr in top_scored:
-                    chunk_id = sr.retrieval.chunk_id
-                    if chunk_id and chunk_id in chunks_dict and chunk_id not in seen_chunk_ids:
-                        filtered_chunk_ids_ordered.append(chunk_id)
-                        seen_chunk_ids.add(chunk_id)
-
-                # Rebuild chunks_dict in the correct order (only include chunks from filtered facts)
-                chunks_dict = {chunk_id: chunks_dict[chunk_id] for chunk_id in filtered_chunk_ids_ordered}
 
             step_duration = time.time() - step_start
             log_buffer.append(
@@ -2547,8 +2616,6 @@ class MemoryEngine(MemoryEngineInterface):
 
             # Entity observations removed - always set to None
             entities_dict = None
-
-            # Chunks were already fetched before token filtering (see Step 5.5 above)
 
             # Finalize trace if enabled
             trace_dict = None
