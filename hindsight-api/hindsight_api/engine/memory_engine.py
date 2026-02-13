@@ -18,11 +18,20 @@ import uuid
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
+import tiktoken
+
 from ..config import get_config
 from ..metrics import get_metrics_collector
 from ..tracing import create_operation_span
 from ..utils import mask_network_location
 from .db_budget import budgeted_operation
+from .operation_metadata import (
+    BatchRetainChildMetadata,
+    BatchRetainParentMetadata,
+    ConsolidationMetadata,
+    RefreshMentalModelMetadata,
+    RetainMetadata,
+)
 
 # Context variable for current schema (async-safe, per-task isolation)
 # Note: default is None, actual default comes from config via get_current_schema()
@@ -36,6 +45,15 @@ def get_current_schema() -> str:
         # Fall back to configured default schema
         return get_config().database_schema
     return schema
+
+
+# Initialize tiktoken encoder once at module level for efficiency
+_tiktoken_encoder = tiktoken.get_encoding("cl100k_base")  # GPT-4/GPT-3.5-turbo encoding
+
+
+def count_tokens(text: str) -> int:
+    """Count tokens in text using tiktoken (cl100k_base encoding for GPT-4/3.5)."""
+    return len(_tiktoken_encoder.encode(text))
 
 
 def fq_table(table_name: str) -> str:
@@ -1430,35 +1448,49 @@ class MemoryEngine(MemoryEngineInterface):
                 if "document_id" not in item:
                     item["document_id"] = document_id
 
-        # Auto-chunk large batches by character count to avoid timeouts and memory issues
-        # Calculate total character count
-        total_chars = sum(len(item.get("content", "")) for item in contents)
+        # Validate no duplicate document_ids in the batch
+        # Having duplicate document_ids causes race conditions in document upserts during parallel processing
+        doc_ids = [item.get("document_id") for item in contents if item.get("document_id")]
+        if len(doc_ids) != len(set(doc_ids)):
+            from collections import Counter
+
+            duplicates = [doc_id for doc_id, count in Counter(doc_ids).items() if count > 1]
+            raise ValueError(
+                f"Batch contains duplicate document_ids: {duplicates}. "
+                f"Each content item in a batch must have a unique document_id to avoid race conditions."
+            )
+
+        # Auto-chunk large batches by token count to avoid timeouts and memory issues
+        # Calculate total token count
+        total_tokens = sum(count_tokens(item.get("content", "")) for item in contents)
         total_usage = TokenUsage()
 
-        CHARS_PER_BATCH = 600_000
+        # Get batch size threshold from config
+        config = get_config()
+        tokens_per_batch = config.retain_batch_tokens
 
-        if total_chars > CHARS_PER_BATCH:
-            # Split into smaller batches based on character count
+        if total_tokens > tokens_per_batch:
+            # Split into smaller batches based on token count
             logger.info(
-                f"Large batch detected ({total_chars:,} chars from {len(contents)} items). Splitting into sub-batches of ~{CHARS_PER_BATCH:,} chars each..."
+                f"Large batch detected ({total_tokens:,} tokens from {len(contents)} items). Splitting into sub-batches of ~{tokens_per_batch:,} tokens each..."
             )
 
             sub_batches = []
             current_batch = []
-            current_batch_chars = 0
+            current_batch_tokens = 0
 
             for item in contents:
-                item_chars = len(item.get("content", ""))
+                item_tokens = count_tokens(item.get("content", ""))
 
                 # If adding this item would exceed the limit, start a new batch
                 # (unless current batch is empty - then we must include it even if it's large)
-                if current_batch and current_batch_chars + item_chars > CHARS_PER_BATCH:
+                if current_batch and current_batch_tokens + item_tokens > tokens_per_batch:
                     sub_batches.append(current_batch)
                     current_batch = [item]
-                    current_batch_chars = item_chars
+                    current_batch_tokens = item_tokens
                 else:
                     current_batch.append(item)
-                    current_batch_chars += item_chars
+                    current_batch_tokens += item_tokens
 
             # Add the last batch
             if current_batch:
@@ -1469,9 +1501,9 @@ class MemoryEngine(MemoryEngineInterface):
             # Process each sub-batch
             all_results = []
             for i, sub_batch in enumerate(sub_batches, 1):
-                sub_batch_chars = sum(len(item.get("content", "")) for item in sub_batch)
+                sub_batch_tokens = sum(count_tokens(item.get("content", "")) for item in sub_batch)
                 logger.info(
-                    f"Processing sub-batch {i}/{len(sub_batches)}: {len(sub_batch)} items, {sub_batch_chars:,} chars"
+                    f"Processing sub-batch {i}/{len(sub_batches)}: {len(sub_batch)} items, {sub_batch_tokens:,} tokens"
                 )
 
                 sub_results, sub_usage = await self._retain_batch_async_internal(
@@ -5463,10 +5495,10 @@ class MemoryEngine(MemoryEngineInterface):
             )
             total = total_row["total"] if total_row else 0
 
-            # Get operations with pagination
+            # Get operations with pagination (include result_metadata to check for parent operations)
             operations = await conn.fetch(
                 f"""
-                SELECT operation_id, operation_type, created_at, status, error_message
+                SELECT operation_id, operation_type, created_at, status, error_message, result_metadata
                 FROM {fq_table("async_operations")}
                 WHERE {where_clause}
                 ORDER BY created_at DESC
@@ -5477,21 +5509,59 @@ class MemoryEngine(MemoryEngineInterface):
                 offset,
             )
 
-            return {
-                "total": total,
-                "operations": [
+            # Build operation list, aggregating status for parent operations
+            operation_list = []
+            for row in operations:
+                result_metadata = json.loads(row["result_metadata"]) if row["result_metadata"] else {}
+                is_parent = result_metadata.get("is_parent", False)
+
+                # For parent operations, aggregate child statuses
+                if is_parent:
+                    # Query child operations to get aggregated status
+                    child_rows = await conn.fetch(
+                        f"""
+                        SELECT status
+                        FROM {fq_table("async_operations")}
+                        WHERE bank_id = $1
+                        AND result_metadata::jsonb @> $2::jsonb
+                        """,
+                        bank_id,
+                        json.dumps({"parent_operation_id": str(row["operation_id"])}),
+                    )
+
+                    # Aggregate child statuses
+                    if child_rows:
+                        all_completed = all(child["status"] == "completed" for child in child_rows)
+                        any_failed = any(child["status"] == "failed" for child in child_rows)
+
+                        if any_failed:
+                            aggregated_status = "failed"
+                        elif all_completed:
+                            aggregated_status = "completed"
+                        else:
+                            aggregated_status = "pending"
+                    else:
+                        # No children yet (shouldn't happen)
+                        aggregated_status = "pending"
+                else:
+                    # Regular operation - use DB status
+                    aggregated_status = "pending" if row["status"] in ("pending", "processing") else row["status"]
+
+                operation_list.append(
                     {
                         "id": str(row["operation_id"]),
                         "task_type": row["operation_type"],
                         "items_count": 0,
                         "document_id": None,
                         "created_at": row["created_at"].isoformat(),
-                        # Map DB status to API status (processing -> pending for simplicity)
-                        "status": "pending" if row["status"] in ("pending", "processing") else row["status"],
+                        "status": aggregated_status,
                         "error_message": row["error_message"],
                     }
-                    for row in operations
-                ],
+                )
+
+            return {
+                "total": total,
+                "operations": operation_list,
             }
 
     async def get_operation_status(
@@ -5503,10 +5573,16 @@ class MemoryEngine(MemoryEngineInterface):
     ) -> dict[str, Any]:
         """Get the status of a specific async operation.
 
+        For parent operations (batch_retain with sub-batches), aggregates child operation statuses:
+        - status = "completed" only if all children are completed
+        - status = "failed" if any child failed
+        - status = "pending" otherwise (includes "processing" children)
+
         Returns:
             - status: "pending", "completed", or "failed"
             - updated_at: last update timestamp
             - completed_at: completion timestamp (if completed)
+            - child_operations: (for parent operations) list of child operation statuses
         """
         await self._authenticate_tenant(request_context)
         pool = await self._get_pool()
@@ -5516,7 +5592,7 @@ class MemoryEngine(MemoryEngineInterface):
         async with acquire_with_retry(pool) as conn:
             row = await conn.fetchrow(
                 f"""
-                SELECT operation_id, operation_type, created_at, updated_at, completed_at, status, error_message
+                SELECT operation_id, operation_type, created_at, updated_at, completed_at, status, error_message, result_metadata
                 FROM {fq_table("async_operations")}
                 WHERE operation_id = $1 AND bank_id = $2
                 """,
@@ -5525,18 +5601,94 @@ class MemoryEngine(MemoryEngineInterface):
             )
 
             if row:
-                # Map DB status to API status (processing -> pending for simplicity)
-                db_status = row["status"]
-                api_status = "pending" if db_status in ("pending", "processing") else db_status
-                return {
-                    "operation_id": operation_id,
-                    "status": api_status,
-                    "operation_type": row["operation_type"],
-                    "created_at": row["created_at"].isoformat() if row["created_at"] else None,
-                    "updated_at": row["updated_at"].isoformat() if row["updated_at"] else None,
-                    "completed_at": row["completed_at"].isoformat() if row["completed_at"] else None,
-                    "error_message": row["error_message"],
-                }
+                # Check if this is a parent operation
+                result_metadata = json.loads(row["result_metadata"]) if row["result_metadata"] else {}
+                is_parent = result_metadata.get("is_parent", False)
+
+                if is_parent:
+                    # Query child operations
+                    child_rows = await conn.fetch(
+                        f"""
+                        SELECT operation_id, status, error_message, result_metadata, updated_at, completed_at
+                        FROM {fq_table("async_operations")}
+                        WHERE bank_id = $1
+                        AND result_metadata::jsonb @> $2::jsonb
+                        ORDER BY (result_metadata->>'sub_batch_index')::int
+                        """,
+                        bank_id,
+                        json.dumps({"parent_operation_id": operation_id}),
+                    )
+
+                    # Aggregate child statuses
+                    child_statuses = []
+                    all_completed = True
+                    any_failed = False
+                    latest_updated_at = row["updated_at"]
+                    latest_completed_at = None
+
+                    for child_row in child_rows:
+                        child_status = child_row["status"]
+                        child_metadata = (
+                            json.loads(child_row["result_metadata"]) if child_row["result_metadata"] else {}
+                        )
+
+                        child_statuses.append(
+                            {
+                                "operation_id": str(child_row["operation_id"]),
+                                "status": child_status,
+                                "sub_batch_index": child_metadata.get("sub_batch_index"),
+                                "items_count": child_metadata.get("items_count"),
+                                "error_message": child_row["error_message"],
+                            }
+                        )
+
+                        if child_status != "completed":
+                            all_completed = False
+                        if child_status == "failed":
+                            any_failed = True
+
+                    # Determine aggregated status
+                    if any_failed:
+                        aggregated_status = "failed"
+                    elif all_completed and len(child_rows) > 0:
+                        aggregated_status = "completed"
+                        # Use the latest completed_at from children
+                        # (we don't update parent's completed_at in DB, but we can show it in API)
+                        if all_completed:
+                            latest_completed_at = max(
+                                (child_row["updated_at"] for child_row in child_rows if child_row["updated_at"]),
+                                default=None,
+                            )
+                    else:
+                        aggregated_status = "pending"
+
+                    return {
+                        "operation_id": operation_id,
+                        "status": aggregated_status,
+                        "operation_type": row["operation_type"],
+                        "created_at": row["created_at"].isoformat() if row["created_at"] else None,
+                        "updated_at": latest_updated_at.isoformat() if latest_updated_at else None,
+                        "completed_at": latest_completed_at.isoformat() if latest_completed_at else None,
+                        "error_message": row["error_message"],
+                        "result_metadata": result_metadata,
+                        "child_operations": child_statuses,
+                        "total_items": result_metadata.get("items_count"),
+                        "num_sub_batches": result_metadata.get("num_sub_batches"),
+                    }
+                else:
+                    # Regular operation (not a parent)
+                    db_status = row["status"]
+                    api_status = "pending" if db_status in ("pending", "processing") else db_status
+                    return {
+                        "operation_id": operation_id,
+                        "status": api_status,
+                        "operation_type": row["operation_type"],
+                        "created_at": row["created_at"].isoformat() if row["created_at"] else None,
+                        "updated_at": row["updated_at"].isoformat() if row["updated_at"] else None,
+                        "completed_at": row["completed_at"].isoformat() if row["completed_at"] else None,
+                        "error_message": row["error_message"],
+                        "result_metadata": result_metadata,
+                    }
             else:
                 # Operation not found
                 return {
@@ -5712,31 +5864,126 @@ class MemoryEngine(MemoryEngineInterface):
         request_context: "RequestContext",
         document_tags: list[str] | None = None,
     ) -> dict[str, Any]:
-        """Submit a batch retain operation to run asynchronously."""
+        """Submit a batch retain operation to run asynchronously.
+
+        For large batches (exceeding retain_batch_chars threshold), automatically splits
+        into smaller sub-batches and creates a parent operation that tracks all children.
+        """
         await self._authenticate_tenant(request_context)
 
-        task_payload: dict[str, Any] = {"contents": contents}
-        if document_tags:
-            task_payload["document_tags"] = document_tags
-        # Pass tenant_id and api_key_id through task payload so the worker
-        # can propagate request context to downstream operations (e.g.,
-        # consolidation and mental model refreshes triggered after retain).
-        if request_context.tenant_id:
-            task_payload["_tenant_id"] = request_context.tenant_id
-        if request_context.api_key_id:
-            task_payload["_api_key_id"] = request_context.api_key_id
+        # Validate no duplicate document_ids in the batch
+        # Having duplicate document_ids causes race conditions in document upserts during parallel processing
+        doc_ids = [item.get("document_id") for item in contents if item.get("document_id")]
+        if len(doc_ids) != len(set(doc_ids)):
+            from collections import Counter
 
-        result = await self._submit_async_operation(
-            bank_id=bank_id,
-            operation_type="retain",
-            task_type="batch_retain",
-            task_payload=task_payload,
-            result_metadata={"items_count": len(contents)},
-            dedupe_by_bank=False,
+            duplicates = [doc_id for doc_id, count in Counter(doc_ids).items() if count > 1]
+            raise ValueError(
+                f"Batch contains duplicate document_ids: {duplicates}. "
+                f"Each content item in a batch must have a unique document_id to avoid race conditions."
+            )
+
+        # Calculate total token count and determine if we need to split
+        total_tokens = sum(count_tokens(item.get("content", "")) for item in contents)
+        config = get_config()
+        tokens_per_batch = config.retain_batch_tokens
+
+        # Split into sub-batches based on token count
+        sub_batches = []
+        current_batch = []
+        current_batch_tokens = 0
+
+        for item in contents:
+            item_tokens = count_tokens(item.get("content", ""))
+
+            # If adding this item would exceed the limit, start a new batch
+            # (unless current batch is empty - then we must include it even if it's large)
+            if current_batch and current_batch_tokens + item_tokens > tokens_per_batch:
+                sub_batches.append(current_batch)
+                current_batch = [item]
+                current_batch_tokens = item_tokens
+            else:
+                current_batch.append(item)
+                current_batch_tokens += item_tokens
+
+        # Add the last batch
+        if current_batch:
+            sub_batches.append(current_batch)
+
+        # Log splitting info if we actually split
+        if len(sub_batches) > 1:
+            logger.info(
+                f"Large async retain batch ({total_tokens:,} tokens from {len(contents)} items). "
+                f"Split into {len(sub_batches)} sub-batches: {[len(b) for b in sub_batches]} items each"
+            )
+
+        # Always create parent operation (even for single batch - simpler, more reliable code path)
+        import uuid
+
+        parent_operation_id = uuid.uuid4()
+        pool = await self._get_pool()
+
+        # Create typed metadata for parent operation
+        parent_metadata = BatchRetainParentMetadata(
+            items_count=len(contents),
+            total_tokens=total_tokens,
+            num_sub_batches=len(sub_batches),
         )
 
-        result["items_count"] = len(contents)
-        return result
+        async with acquire_with_retry(pool) as conn:
+            await conn.execute(
+                f"""
+                INSERT INTO {fq_table("async_operations")} (operation_id, bank_id, operation_type, result_metadata, status)
+                VALUES ($1, $2, $3, $4, $5)
+                """,
+                parent_operation_id,
+                bank_id,
+                "batch_retain",
+                json.dumps(parent_metadata.to_dict()),
+                "pending",  # Will be updated by status aggregation
+            )
+
+        logger.info(f"Created parent operation {parent_operation_id} for {len(sub_batches)} sub-batch(es)")
+
+        # Submit child operations for each sub-batch
+        for i, sub_batch in enumerate(sub_batches, 1):
+            if len(sub_batches) > 1:
+                sub_batch_tokens = sum(count_tokens(item.get("content", "")) for item in sub_batch)
+                logger.info(
+                    f"Submitting sub-batch {i}/{len(sub_batches)}: {len(sub_batch)} items, {sub_batch_tokens:,} tokens"
+                )
+
+            task_payload: dict[str, Any] = {"contents": sub_batch}
+            if document_tags:
+                task_payload["document_tags"] = document_tags
+            # Pass tenant_id and api_key_id through task payload
+            if request_context.tenant_id:
+                task_payload["_tenant_id"] = request_context.tenant_id
+            if request_context.api_key_id:
+                task_payload["_api_key_id"] = request_context.api_key_id
+
+            # Create typed metadata for child operation
+            child_metadata = BatchRetainChildMetadata(
+                items_count=len(sub_batch),
+                parent_operation_id=str(parent_operation_id),
+                sub_batch_index=i,
+                total_sub_batches=len(sub_batches),
+            )
+
+            # Create child operation with reference to parent
+            await self._submit_async_operation(
+                bank_id=bank_id,
+                operation_type="retain",
+                task_type="batch_retain",
+                task_payload=task_payload,
+                result_metadata=child_metadata.to_dict(),
+                dedupe_by_bank=False,
+            )
+
+        return {
+            "operation_id": str(parent_operation_id),
+            "items_count": len(contents),
+        }
 
     async def submit_async_consolidation(
         self,

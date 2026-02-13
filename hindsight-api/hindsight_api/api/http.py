@@ -1381,6 +1381,17 @@ class OperationStatusResponse(BaseModel):
     updated_at: str | None = None
     completed_at: str | None = None
     error_message: str | None = None
+    result_metadata: dict[str, Any] | None = Field(
+        default=None,
+        description="Internal metadata for debugging. Structure may change without notice. Not for production use.",
+    )
+    child_operations: list[dict[str, Any]] | None = Field(
+        default=None, description="Child operations for batch operations (if applicable)"
+    )
+    total_items: int | None = Field(default=None, description="Total items for batch operations (if applicable)")
+    num_sub_batches: int | None = Field(
+        default=None, description="Number of sub-batches for batch operations (if applicable)"
+    )
 
 
 class AsyncOperationSubmitResponse(BaseModel):
