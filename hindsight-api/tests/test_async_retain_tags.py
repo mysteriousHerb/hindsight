@@ -1,6 +1,6 @@
 """Unit tests for async retain tag propagation."""
 
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -12,8 +12,18 @@ from hindsight_api.models import RequestContext
 async def test_submit_async_retain_includes_document_tags_in_task_payload():
     """submit_async_retain should include document_tags in queued task payload."""
     engine = MemoryEngine.__new__(MemoryEngine)
+    engine._initialized = True
     engine._authenticate_tenant = AsyncMock()
     engine._submit_async_operation = AsyncMock(return_value={"operation_id": "op-1"})
+
+    # Mock the pool and connection for parent operation creation
+    mock_conn = MagicMock()
+    mock_conn.execute = AsyncMock()
+    mock_conn.__aenter__ = AsyncMock(return_value=mock_conn)
+    mock_conn.__aexit__ = AsyncMock(return_value=None)
+
+    mock_pool = MagicMock()
+    engine._get_pool = AsyncMock(return_value=mock_pool)
 
     request_context = RequestContext(tenant_id="tenant-a", api_key_id="key-a")
     contents = [{"content": "Async retain payload test."}]
@@ -45,6 +55,7 @@ async def test_submit_async_retain_includes_document_tags_in_task_payload():
 async def test_handle_batch_retain_forwards_document_tags_to_retain_batch_async():
     """Worker handler should forward document_tags from task payload."""
     engine = MemoryEngine.__new__(MemoryEngine)
+    engine._initialized = True
     engine.retain_batch_async = AsyncMock(return_value={"items_count": 1})
 
     task_dict = {

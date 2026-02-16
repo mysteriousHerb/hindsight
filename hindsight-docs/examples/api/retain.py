@@ -41,11 +41,10 @@ client.retain(
 client.retain_batch(
     bank_id="my-bank",
     items=[
-        {"content": "Alice works at Google", "context": "career"},
-        {"content": "Bob is a data scientist at Meta", "context": "career"},
-        {"content": "Alice and Bob are friends", "context": "relationship"}
-    ],
-    document_id="conversation_001"
+        {"content": "Alice works at Google", "context": "career", "document_id": "conversation_001_msg_1"},
+        {"content": "Bob is a data scientist at Meta", "context": "career", "document_id": "conversation_001_msg_2"},
+        {"content": "Alice and Bob are friends", "context": "relationship", "document_id": "conversation_001_msg_3"}
+    ]
 )
 # [/docs:retain-batch]
 
