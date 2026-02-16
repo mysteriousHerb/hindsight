@@ -17,12 +17,16 @@ async def test_submit_async_retain_includes_document_tags_in_task_payload():
     engine._submit_async_operation = AsyncMock(return_value={"operation_id": "op-1"})
 
     # Mock the pool and connection for parent operation creation
-    mock_conn = MagicMock()
+    mock_conn = AsyncMock()
     mock_conn.execute = AsyncMock()
-    mock_conn.__aenter__ = AsyncMock(return_value=mock_conn)
-    mock_conn.__aexit__ = AsyncMock(return_value=None)
+    mock_conn.transaction = MagicMock()
+    mock_conn.transaction.return_value.__aenter__ = AsyncMock()
+    mock_conn.transaction.return_value.__aexit__ = AsyncMock()
 
-    mock_pool = MagicMock()
+    mock_pool = AsyncMock()
+    mock_pool.acquire = AsyncMock(return_value=mock_conn)
+    mock_pool.release = AsyncMock()
+
     engine._get_pool = AsyncMock(return_value=mock_pool)
 
     request_context = RequestContext(tenant_id="tenant-a", api_key_id="key-a")

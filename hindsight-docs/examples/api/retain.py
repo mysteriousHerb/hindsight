@@ -54,10 +54,9 @@ client.retain_batch(
 result = client.retain_batch(
     bank_id="my-bank",
     items=[
-        {"content": "Large batch item 1"},
-        {"content": "Large batch item 2"},
+        {"content": "Large batch item 1", "document_id": "large-doc-1"},
+        {"content": "Large batch item 2", "document_id": "large-doc-2"},
     ],
-    document_id="large-doc",
     retain_async=True
 )
 

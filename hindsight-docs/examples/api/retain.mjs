@@ -41,10 +41,9 @@ await client.retainBatch('my-bank', [
 // [docs:retain-async]
 // Start async ingestion (returns immediately)
 await client.retainBatch('my-bank', [
-    { content: 'Large batch item 1' },
-    { content: 'Large batch item 2' },
+    { content: 'Large batch item 1', document_id: 'large-doc-1' },
+    { content: 'Large batch item 2', document_id: 'large-doc-2' },
 ], {
-    documentId: 'large-doc',
     async: true
 });
 // [/docs:retain-async]
