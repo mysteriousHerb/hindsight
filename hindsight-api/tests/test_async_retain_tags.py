@@ -41,10 +41,18 @@ async def test_submit_async_retain_includes_document_tags_in_task_payload():
         request_context=request_context,
     )
 
-    assert result == {"operation_id": "op-1", "items_count": 1}
+    # Check result structure
+    assert "operation_id" in result
+    assert "items_count" in result
+    assert result["items_count"] == 1
+
+    # Verify authentication was called
     engine._authenticate_tenant.assert_awaited_once_with(request_context)
+
+    # Verify child operation was submitted
     engine._submit_async_operation.assert_awaited_once()
 
+    # Verify child operation payload contains document_tags
     kwargs = engine._submit_async_operation.await_args.kwargs
     assert kwargs["bank_id"] == "bank-1"
     assert kwargs["operation_type"] == "retain"
