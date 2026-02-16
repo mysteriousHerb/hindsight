@@ -695,6 +695,91 @@ Example: "Lost job → couldn't pay rent → moved apartment"
 - Fact 2: Moved apartment, causal_relations: [{target_index: 1, relation_type: "caused_by"}]"""
 
 
+def _build_extraction_prompt_and_schema(config) -> tuple[str, type]:
+    """
+    Build extraction prompt and response schema based on config.
+
+    Returns:
+        Tuple of (prompt, response_schema)
+    """
+    fact_types_instruction = "Extract ONLY 'world' and 'assistant' type facts."
+    extraction_mode = config.retain_extraction_mode
+    extract_causal_links = config.retain_extract_causal_links
+
+    # Select base prompt based on extraction mode
+    if extraction_mode == "custom":
+        if not config.retain_custom_instructions:
+            base_prompt = CONCISE_FACT_EXTRACTION_PROMPT
+            prompt = base_prompt.format(fact_types_instruction=fact_types_instruction)
+        else:
+            base_prompt = CUSTOM_FACT_EXTRACTION_PROMPT
+            prompt = base_prompt.format(
+                fact_types_instruction=fact_types_instruction,
+                custom_instructions=config.retain_custom_instructions,
+            )
+    elif extraction_mode == "verbose":
+        base_prompt = VERBOSE_FACT_EXTRACTION_PROMPT
+        prompt = base_prompt.format(fact_types_instruction=fact_types_instruction)
+    else:
+        base_prompt = CONCISE_FACT_EXTRACTION_PROMPT
+        prompt = base_prompt.format(fact_types_instruction=fact_types_instruction)
+
+    # Add causal relationships section if enabled
+    if extract_causal_links:
+        prompt = prompt + CAUSAL_RELATIONSHIPS_SECTION
+        response_schema = FactExtractionResponseVerbose if extraction_mode == "verbose" else FactExtractionResponse
+    else:
+        response_schema = FactExtractionResponseNoCausal
+
+    return prompt, response_schema
+
+
+def _build_user_message(chunk: str, chunk_index: int, total_chunks: int, event_date: datetime, context: str) -> str:
+    """Build user message for fact extraction."""
+    from .orchestrator import parse_datetime_flexible
+
+    sanitized_chunk = _sanitize_text(chunk)
+    sanitized_context = _sanitize_text(context) if context else "none"
+    event_date = parse_datetime_flexible(event_date)
+    event_date_formatted = event_date.strftime("%A, %B %d, %Y")
+
+    return f"""Extract facts from the following text chunk.
+
+Chunk: {chunk_index + 1}/{total_chunks}
+Event Date: {event_date_formatted} ({event_date.isoformat()})
+Context: {sanitized_context}
+
+Text:
+{sanitized_chunk}"""
+
+
+def _build_request_body(llm_config, config, prompt: str, user_message: str, response_schema: type) -> dict:
+    """Build request body for LLM API call."""
+    request_body = {
+        "model": llm_config.model,
+        "messages": [{"role": "system", "content": prompt}, {"role": "user", "content": user_message}],
+        "temperature": 0.1,
+    }
+
+    # Add max_completion_tokens if configured
+    if config.retain_max_completion_tokens:
+        request_body["max_completion_tokens"] = config.retain_max_completion_tokens
+
+    # Add service_tier for OpenAI Flex Processing
+    if llm_config.provider == "openai" and llm_config._provider_impl.openai_service_tier:
+        request_body["service_tier"] = llm_config._provider_impl.openai_service_tier
+
+    # Add response_format (JSON schema)
+    if hasattr(response_schema, "model_json_schema"):
+        schema = response_schema.model_json_schema()
+        request_body["response_format"] = {
+            "type": "json_schema",
+            "json_schema": {"name": "facts", "schema": schema},
+        }
+
+    return request_body
+
+
 async def _extract_facts_from_chunk(
     chunk: str,
     chunk_index: int,
@@ -717,71 +802,19 @@ async def _extract_facts_from_chunk(
 
     logger = logging.getLogger(__name__)
 
-    # Determine which fact types to extract
-    # Note: We use "assistant" in the prompt but convert to "bank" for storage
-    fact_types_instruction = "Extract ONLY 'world' and 'assistant' type facts."
+    # Build prompt and schema using helper function
+    prompt, response_schema = _build_extraction_prompt_and_schema(config)
 
     # Check config for extraction mode and causal link extraction
     extraction_mode = config.retain_extraction_mode
     extract_causal_links = config.retain_extract_causal_links
 
-    # Select base prompt based on extraction mode
-    if extraction_mode == "custom":
-        # Custom mode: inject user-provided guidelines
-        if not config.retain_custom_instructions:
-            logger.warning(
-                "extraction_mode='custom' but HINDSIGHT_API_RETAIN_CUSTOM_INSTRUCTIONS not set. "
-                "Falling back to 'concise' mode."
-            )
-            base_prompt = CONCISE_FACT_EXTRACTION_PROMPT
-            prompt = base_prompt.format(fact_types_instruction=fact_types_instruction)
-        else:
-            base_prompt = CUSTOM_FACT_EXTRACTION_PROMPT
-            prompt = base_prompt.format(
-                fact_types_instruction=fact_types_instruction,
-                custom_instructions=config.retain_custom_instructions,
-            )
-    elif extraction_mode == "verbose":
-        base_prompt = VERBOSE_FACT_EXTRACTION_PROMPT
-        prompt = base_prompt.format(fact_types_instruction=fact_types_instruction)
-    else:
-        base_prompt = CONCISE_FACT_EXTRACTION_PROMPT
-        prompt = base_prompt.format(fact_types_instruction=fact_types_instruction)
-
-    # Build the full prompt with or without causal relationships section
-    # Select appropriate response schema based on extraction mode and causal links
-    if extract_causal_links:
-        prompt = prompt + CAUSAL_RELATIONSHIPS_SECTION
-        if extraction_mode == "verbose":
-            response_schema = FactExtractionResponseVerbose
-        else:
-            response_schema = FactExtractionResponse
-    else:
-        response_schema = FactExtractionResponseNoCausal
+    # Build user message using helper function
+    user_message = _build_user_message(chunk, chunk_index, total_chunks, event_date, context)
 
     # Retry logic for JSON validation errors
     max_retries = 2
     last_error = None
-
-    # Sanitize input text to prevent Unicode encoding errors (e.g., unpaired surrogates)
-    sanitized_chunk = _sanitize_text(chunk)
-    sanitized_context = _sanitize_text(context) if context else "none"
-
-    # Build user message with metadata and chunk content in a clear format
-    # Format event_date with day of week for better temporal reasoning
-    # Handle both datetime objects and ISO string formats (from deserialized async tasks)
-    from .orchestrator import parse_datetime_flexible
-
-    event_date = parse_datetime_flexible(event_date)
-    event_date_formatted = event_date.strftime("%A, %B %d, %Y")  # e.g., "Monday, June 10, 2024"
-    user_message = f"""Extract facts from the following text chunk.
-
-Chunk: {chunk_index + 1}/{total_chunks}
-Event Date: {event_date_formatted} ({event_date.isoformat()})
-Context: {sanitized_context}
-
-Text:
-{sanitized_chunk}"""
 
     usage = TokenUsage()  # Track cumulative usage across retries
     for attempt in range(max_retries):
@@ -1277,6 +1310,10 @@ async def extract_facts_from_contents_batch_api(
 
     logger.info(f"Using Batch API for fact extraction ({len(contents)} contents)")
 
+    # Check config for extraction mode and causal link extraction (used throughout)
+    extraction_mode = config.retain_extraction_mode
+    extract_causal_links = config.retain_extract_causal_links
+
     # Check if provider supports batch API
     if not await llm_config._provider_impl.supports_batch_api():
         logger.warning(f"Batch API not supported for provider {llm_config.provider}, falling back to sync mode")
@@ -1306,6 +1343,9 @@ async def extract_facts_from_contents_batch_api(
     all_chunks_info = []  # List of (chunk_text, content_index, chunk_index_in_content, event_date, context)
     batch_requests = []
 
+    # Build prompt and schema once (same for all chunks)
+    prompt, response_schema = _build_extraction_prompt_and_schema(config)
+
     for content_index, item in enumerate(contents):
         chunks = chunk_text(item.content, max_chars=config.retain_chunk_size)
 
@@ -1315,81 +1355,13 @@ async def extract_facts_from_contents_batch_api(
             # Build batch request for this chunk
             custom_id = f"chunk_{len(all_chunks_info) - 1}"  # Global chunk index
 
-            # Format event_date with day of week
-            from .orchestrator import parse_datetime_flexible
+            # Build user message using helper function
+            user_message = _build_user_message(
+                chunk, chunk_index_in_content, len(chunks), item.event_date, item.context
+            )
 
-            event_date = parse_datetime_flexible(item.event_date)
-            event_date_formatted = event_date.strftime("%A, %B %d, %Y")
-
-            # Build prompt (same as sync mode)
-            fact_types_instruction = "Extract ONLY 'world' and 'assistant' type facts."
-
-            extraction_mode = config.retain_extraction_mode
-            extract_causal_links = config.retain_extract_causal_links
-
-            if extraction_mode == "custom":
-                if not config.retain_custom_instructions:
-                    base_prompt = CONCISE_FACT_EXTRACTION_PROMPT
-                    prompt = base_prompt.format(fact_types_instruction=fact_types_instruction)
-                else:
-                    base_prompt = CUSTOM_FACT_EXTRACTION_PROMPT
-                    prompt = base_prompt.format(
-                        fact_types_instruction=fact_types_instruction,
-                        custom_instructions=config.retain_custom_instructions,
-                    )
-            elif extraction_mode == "verbose":
-                base_prompt = VERBOSE_FACT_EXTRACTION_PROMPT
-                prompt = base_prompt.format(fact_types_instruction=fact_types_instruction)
-            else:
-                base_prompt = CONCISE_FACT_EXTRACTION_PROMPT
-                prompt = base_prompt.format(fact_types_instruction=fact_types_instruction)
-
-            if extract_causal_links:
-                prompt = prompt + CAUSAL_RELATIONSHIPS_SECTION
-
-            # Select response schema
-            if extract_causal_links:
-                if extraction_mode == "verbose":
-                    response_schema = FactExtractionResponseVerbose
-                else:
-                    response_schema = FactExtractionResponse
-            else:
-                response_schema = FactExtractionResponseNoCausal
-
-            # Sanitize input
-            sanitized_chunk = _sanitize_text(chunk)
-            sanitized_context = _sanitize_text(item.context) if item.context else "none"
-
-            user_message = f"""Extract facts from the following text chunk.
-
-Chunk: {chunk_index_in_content + 1}/{len(chunks)}
-Event Date: {event_date_formatted} ({event_date.isoformat()})
-Context: {sanitized_context}
-
-Text:
-{sanitized_chunk}"""
-
-            # Build request body
-            request_body = {
-                "model": llm_config.model,
-                "messages": [{"role": "system", "content": prompt}, {"role": "user", "content": user_message}],
-                "temperature": 0.1,
-            }
-
-            # Add max_completion_tokens if configured
-            if config.retain_max_completion_tokens:
-                request_body["max_completion_tokens"] = config.retain_max_completion_tokens
-
-            # Add service_tier for OpenAI Flex Processing (50% cost savings)
-            if llm_config.provider == "openai" and llm_config._provider_impl.openai_service_tier:
-                request_body["service_tier"] = llm_config._provider_impl.openai_service_tier
-
-            # Add response_format (JSON schema)
-            schema = response_schema.model_json_schema()
-            request_body["response_format"] = {
-                "type": "json_schema",
-                "json_schema": {"name": "facts", "schema": schema},
-            }
+            # Build request body using helper function
+            request_body = _build_request_body(llm_config, config, prompt, user_message, response_schema)
 
             batch_requests.append(
                 {"custom_id": custom_id, "method": "POST", "url": "/v1/chat/completions", "body": request_body}
@@ -1405,7 +1377,7 @@ Text:
         batch_metadata = await llm_config._provider_impl.submit_batch(batch_requests)
         batch_id = batch_metadata["batch_id"]
 
-        logger.info(f"Batch submitted: {batch_id}, polling every {config.retain_batch_poll_interval}s")
+        logger.info(f"Batch submitted: {batch_id}, polling every {config.retain_batch_poll_interval_seconds}s")
 
         # CRITICAL: Store minimal batch state in operation metadata for crash recovery
         # This allows resuming polling if worker restarts
@@ -1455,7 +1427,7 @@ Text:
             raise RuntimeError(f"Batch {batch_id} failed with status {status}: {error_msg}")
 
         # Wait before polling again
-        await asyncio.sleep(config.retain_batch_poll_interval)
+        await asyncio.sleep(config.retain_batch_poll_interval_seconds)
 
     logger.info(f"Batch {batch_id} completed in {elapsed:.0f}s, retrieving results")
 

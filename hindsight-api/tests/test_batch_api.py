@@ -59,7 +59,7 @@ def hindsight_config():
     """Create test config with batch API enabled."""
     config = HindsightConfig.from_env()
     config.retain_batch_enabled = True
-    config.retain_batch_poll_interval = 1  # Fast polling for tests
+    config.retain_batch_poll_interval_seconds = 1  # Fast polling for tests
     config.retain_chunk_size = 4000
     config.retain_extraction_mode = "concise"
     config.retain_extract_causal_links = False

@@ -108,7 +108,7 @@ def integration_config():
     """Create config for integration test."""
     config = HindsightConfig.from_env()
     config.retain_batch_enabled = True
-    config.retain_batch_poll_interval = 30  # Poll every 30 seconds (reasonable for real API)
+    config.retain_batch_poll_interval_seconds = 30  # Poll every 30 seconds (reasonable for real API)
     config.retain_chunk_size = 4000
     config.retain_extraction_mode = "concise"
     config.retain_extract_causal_links = False
@@ -138,7 +138,7 @@ async def test_real_openai_batch_api(real_llm_config, test_contents_real, integr
     logger.info("STARTING REAL OPENAI BATCH API INTEGRATION TEST")
     logger.info("=" * 80)
     logger.info(f"Test contents: {len(test_contents_real)} items")
-    logger.info(f"Poll interval: {integration_config.retain_batch_poll_interval}s")
+    logger.info(f"Poll interval: {integration_config.retain_batch_poll_interval_seconds}s")
     logger.info(f"Model: {real_llm_config.model}")
     logger.info("This may take several minutes to hours depending on OpenAI's queue...")
     logger.info("=" * 80)
@@ -210,7 +210,7 @@ async def test_real_openai_batch_api(real_llm_config, test_contents_real, integr
             f.write(f"Test Date: {datetime.now(timezone.utc).isoformat()}\n")
             f.write(f"Model: {real_llm_config.model}\n")
             f.write(f"Contents: {len(test_contents_real)} items\n")
-            f.write(f"Poll Interval: {integration_config.retain_batch_poll_interval}s\n\n")
+            f.write(f"Poll Interval: {integration_config.retain_batch_poll_interval_seconds}s\n\n")
             f.write(f"Results:\n")
             f.write(f"  Total Duration: {total_duration:.1f}s ({total_duration/60:.1f} min)\n")
             f.write(f"  Facts Extracted: {len(facts)}\n")

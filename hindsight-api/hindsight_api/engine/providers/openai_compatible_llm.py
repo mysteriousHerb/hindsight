@@ -16,6 +16,7 @@ Features:
 """
 
 import asyncio
+import io
 import json
 import logging
 import os
@@ -816,9 +817,12 @@ class OpenAICompatibleLLM(LLMInterface):
         # Format requests as JSONL
         jsonl_content = "\n".join(json.dumps(req) for req in requests)
 
-        # Upload file to provider
+        # Upload file to provider (wrap in BytesIO with filename)
+        file_bytes = io.BytesIO(jsonl_content.encode("utf-8"))
+        file_bytes.name = "batch_input.jsonl"  # OpenAI SDK needs a filename
+
         file_response = await self._client.files.create(
-            file=jsonl_content.encode("utf-8"),
+            file=file_bytes,
             purpose="batch",
         )
 
