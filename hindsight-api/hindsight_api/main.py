@@ -247,6 +247,7 @@ def main():
             retain_extract_causal_links=config.retain_extract_causal_links,
             retain_extraction_mode=config.retain_extraction_mode,
             retain_custom_instructions=config.retain_custom_instructions,
+            retain_batch_tokens=config.retain_batch_tokens,
             retain_batch_enabled=config.retain_batch_enabled,
             retain_batch_poll_interval_seconds=config.retain_batch_poll_interval_seconds,
             enable_observations=config.enable_observations,
