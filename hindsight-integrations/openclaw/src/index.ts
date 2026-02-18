@@ -758,7 +758,7 @@ export default function (api: MoltbotPluginAPI) {
         const memoriesJson = JSON.stringify(response.results, null, 2);
 
         const contextMessage = `<hindsight_memories>
-Relevant memories from past conversations (score 1=highest, prioritize recent when conflicting):
+Relevant memories from past conversations (prioritize recent when conflicting):
 ${memoriesJson}
 
 User message: ${prompt}
