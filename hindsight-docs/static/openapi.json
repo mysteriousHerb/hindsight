@@ -4803,9 +4803,15 @@
             "description": "Include raw chunks. Set to {} to enable, null to disable (default: disabled)."
           },
           "source_facts": {
-            "$ref": "#/components/schemas/SourceFactsMode",
-            "description": "Include source facts for observation-type results. 'off' = disabled (default), 'ids' = source fact IDs only, 'full' = full source fact objects.",
-            "default": "off"
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SourceFactsIncludeOptions"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Include source facts for observation-type results. Set to {} to enable, null to disable (default: disabled)."
           }
         },
         "type": "object",
@@ -5585,6 +5591,21 @@
             ],
             "title": "Chunks",
             "description": "Chunks for facts, keyed by chunk_id"
+          },
+          "source_facts": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "$ref": "#/components/schemas/RecallResult"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Facts",
+            "description": "Source facts for observation-type results, keyed by fact ID"
           }
         },
         "type": "object",
@@ -5777,20 +5798,6 @@
               }
             ],
             "title": "Source Fact Ids"
-          },
-          "source_facts": {
-            "anyOf": [
-              {
-                "items": {
-                  "$ref": "#/components/schemas/RecallResult"
-                },
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Source Facts"
           }
         },
         "type": "object",
@@ -6464,15 +6471,18 @@
           }
         }
       },
-      "SourceFactsMode": {
-        "type": "string",
-        "enum": [
-          "off",
-          "ids",
-          "full"
-        ],
-        "title": "SourceFactsMode",
-        "description": "Mode for returning source facts for observation-type results."
+      "SourceFactsIncludeOptions": {
+        "properties": {
+          "max_tokens": {
+            "type": "integer",
+            "title": "Max Tokens",
+            "description": "Maximum tokens for source facts",
+            "default": 4096
+          }
+        },
+        "type": "object",
+        "title": "SourceFactsIncludeOptions",
+        "description": "Options for including source facts for observation-type results."
       },
       "TagItem": {
         "properties": {

@@ -199,7 +199,9 @@ class RecallResult(BaseModel):
     metadata: dict[str, str] | None = None  # User-defined metadata
     chunk_id: str | None = None  # Chunk this fact was extracted from
     tags: list[str] | None = None  # Visibility scope tags
-    source_fact_ids: list[str] | None = None  # IDs of source facts (observation type only, when source_facts is enabled)
+    source_fact_ids: list[str] | None = (
+        None  # IDs of source facts (observation type only, when source_facts is enabled)
+    )
 
 
 class EntityObservationResponse(BaseModel):
@@ -2050,7 +2052,9 @@ def _register_routes(app: FastAPI):
             # Convert source facts dict to API format
             source_facts_response = None
             if core_result.source_facts:
-                source_facts_response = {fact_id: _fact_to_result(fact) for fact_id, fact in core_result.source_facts.items()}
+                source_facts_response = {
+                    fact_id: _fact_to_result(fact) for fact_id, fact in core_result.source_facts.items()
+                }
 
             response = RecallResponse(
                 results=recall_results,
