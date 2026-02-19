@@ -4801,6 +4801,11 @@
               }
             ],
             "description": "Include raw chunks. Set to {} to enable, null to disable (default: disabled)."
+          },
+          "source_facts": {
+            "$ref": "#/components/schemas/SourceFactsMode",
+            "description": "Include source facts for observation-type results. 'off' = disabled (default), 'ids' = source fact IDs only, 'full' = full source fact objects.",
+            "default": "off"
           }
         },
         "type": "object",
@@ -5758,6 +5763,34 @@
               }
             ],
             "title": "Tags"
+          },
+          "source_fact_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Fact Ids"
+          },
+          "source_facts": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/RecallResult"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Facts"
           }
         },
         "type": "object",
@@ -6430,6 +6463,16 @@
             "total_tokens": 600
           }
         }
+      },
+      "SourceFactsMode": {
+        "type": "string",
+        "enum": [
+          "off",
+          "ids",
+          "full"
+        ],
+        "title": "SourceFactsMode",
+        "description": "Mode for returning source facts for observation-type results."
       },
       "TagItem": {
         "properties": {
