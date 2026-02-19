@@ -28,7 +28,7 @@ That's it! The plugin will automatically start capturing and recalling memories.
 
 For full documentation, configuration options, troubleshooting, and development guide, see:
 
-**[OpenClaw Integration Documentation](https://vectorize.io/hindsight/sdks/integrations/openclaw)**
+**[OpenClaw Integration Documentation](https://hindsight.vectorize.io/sdks/integrations/openclaw)**
 
 ## Development
 
@@ -66,7 +66,7 @@ uvx hindsight-embed@latest profile list
 
 ## Links
 
-- [Hindsight Documentation](https://vectorize.io/hindsight)
+- [Hindsight Documentation](https://hindsight.vectorize.io/)
 - [OpenClaw Documentation](https://openclaw.ai)
 - [GitHub Repository](https://github.com/vectorize-io/hindsight)
 
