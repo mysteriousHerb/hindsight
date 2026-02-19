@@ -21,7 +21,6 @@ Environment variables:
     HINDSIGHT_API_LLM_PROVIDER: Optional. LLM provider (default: "openai").
     HINDSIGHT_API_LLM_MODEL: Optional. LLM model (default: "gpt-4o-mini").
     HINDSIGHT_API_DATABASE_URL: Optional. Override database URL (default: pg0://hindsight-mcp).
-    HINDSIGHT_API_LOG_LEVEL: Optional. Log level (default: "warning").
 """
 
 import os
@@ -31,7 +30,6 @@ def main() -> None:
     """Start the Hindsight API server with local defaults."""
     # Set local defaults (only if not already configured by the user)
     os.environ.setdefault("HINDSIGHT_API_DATABASE_URL", "pg0://hindsight-mcp")
-    os.environ.setdefault("HINDSIGHT_API_LOG_LEVEL", "warning")
 
     from hindsight_api.main import main as api_main
 

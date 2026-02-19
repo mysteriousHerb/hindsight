@@ -58,10 +58,10 @@ claude mcp add --transport http hindsight http://localhost:8888/mcp/
 
 ### Single-bank mode
 
-Use `http://localhost:8888/mcp/<bank-id>/` — pins all tools to one bank, no `bank_id` parameter needed.
+Use `http://localhost:8888/mcp/<bank-id>/` — pins all tools to one bank, no `bank_id` parameter needed. This replaces the old `HINDSIGHT_API_MCP_LOCAL_BANK_ID` env var.
 
 ```bash
-claude mcp add --transport http hindsight http://localhost:8888/mcp/default/
+claude mcp add --transport http hindsight http://localhost:8888/mcp/my-bank/
 ```
 
 ## Available Tools
@@ -93,7 +93,7 @@ All standard [Hindsight configuration variables](/developer/configuration) are s
 | `HINDSIGHT_API_LLM_MODEL` | No | `gpt-4o-mini` | Model name |
 | `HINDSIGHT_API_DATABASE_URL` | No | `pg0://hindsight-mcp` | Override the database URL |
 | `HINDSIGHT_API_PORT` | No | `8888` | Port to listen on |
-| `HINDSIGHT_API_LOG_LEVEL` | No | `warning` | Log level |
+| `HINDSIGHT_API_LOG_LEVEL` | No | `info` | Log level |
 
 *Not required when using a local provider like Ollama.
 
