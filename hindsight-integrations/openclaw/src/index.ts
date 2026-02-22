@@ -1,4 +1,4 @@
-import type { MoltbotPluginAPI, PluginConfig } from './types.js';
+import type { MoltbotPluginAPI, PluginConfig, MemoryResult } from './types.js';
 import { HindsightEmbedManager } from './embed-manager.js';
 import { HindsightClient, type HindsightClientOptions } from './client.js';
 import { dirname } from 'path';
@@ -150,6 +150,18 @@ export function stripMemoryTags(content: string): string {
 }
 
 /**
+ * Clean up recalled memories to remove unhelpful metadata.
+ * Keeps only text and temporal context.
+ */
+export function formatMemories(memories: MemoryResult[]): string {
+  const cleaned = memories.map(r => ({
+    text: r.text,
+    mentioned_at: r.mentioned_at,
+  }));
+  return JSON.stringify(cleaned, null, 2);
+}
+
+/**
  * Extract a recall query from a hook event's rawMessage or prompt.
  *
  * Prefers rawMessage (clean user text). Falls back to prompt, stripping
@@ -214,10 +226,10 @@ interface PluginHookAgentContext {
 
 /**
  * Derive a bank ID from the agent context.
- * Creates per-user banks: {messageProvider}-{senderId}
+ * Creates per-user banks: {agentId}-{messageProvider}-{senderId}
  * Falls back to default bank when context is unavailable.
  */
-function deriveBankId(
+export function deriveBankId(
   ctx: PluginHookAgentContext | undefined,
   pluginConfig: PluginConfig
 ): string {
@@ -228,11 +240,12 @@ function deriveBankId(
       : DEFAULT_BANK_NAME;
   }
 
+  const agentId = ctx?.agentId || 'default';
   const channelType = ctx?.messageProvider || 'unknown';
   const userId = ctx?.senderId || 'default';
 
-  // Build bank ID: {prefix?}-{channelType}-{senderId}
-  const baseBankId = `${channelType}-${userId}`;
+  // Build bank ID: {prefix?}-{agentId}-{channelType}-{userId}
+  const baseBankId = `${agentId}-${channelType}-${userId}`;
   return pluginConfig.bankIdPrefix
     ? `${pluginConfig.bankIdPrefix}-${baseBankId}`
     : baseBankId;
@@ -789,8 +802,8 @@ export default function (api: MoltbotPluginAPI) {
           return;
         }
 
-        // Format memories as JSON with all fields from recall
-        const memoriesJson = JSON.stringify(response.results, null, 2);
+        // Format memories - keep only relevant fields (text, mentioned_at)
+        const memoriesJson = formatMemories(response.results);
 
         const contextMessage = `<hindsight_memories>
 Relevant memories from past conversations (prioritize recent when conflicting):

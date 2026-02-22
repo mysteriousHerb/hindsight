@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { stripMemoryTags, extractRecallQuery } from './index.js';
+import { stripMemoryTags, extractRecallQuery, formatMemories } from './index.js';
+import type { MemoryResult } from './types.js';
 
 // ---------------------------------------------------------------------------
 // stripMemoryTags
@@ -139,5 +140,45 @@ describe('extractRecallQuery', () => {
   it('trims whitespace from result', () => {
     const result = extractRecallQuery('   What is my job?   ', undefined);
     expect(result).toBe('What is my job?');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// formatMemories
+// ---------------------------------------------------------------------------
+
+describe('formatMemories', () => {
+  it('strips unhelpful metadata and keeps only text and mentioned_at', () => {
+    const memories: MemoryResult[] = [
+      {
+        id: 'mem_1',
+        text: 'User likes pizza',
+        type: 'fact',
+        entities: ['pizza'],
+        context: 'conversation',
+        occurred_start: '2023-01-01T10:00:00Z',
+        occurred_end: '2023-01-01T10:00:00Z',
+        mentioned_at: '2023-01-01T10:00:00Z',
+        document_id: 'doc_1',
+        metadata: { foo: 'bar' },
+        chunk_id: 'chunk_1',
+        tags: ['food'],
+      },
+    ];
+
+    const result = JSON.parse(formatMemories(memories));
+
+    expect(result).toHaveLength(1);
+    expect(result[0]).toEqual({
+      text: 'User likes pizza',
+      mentioned_at: '2023-01-01T10:00:00Z',
+    });
+    expect(result[0].id).toBeUndefined();
+    expect(result[0].type).toBeUndefined();
+    expect(result[0].metadata).toBeUndefined();
+  });
+
+  it('handles empty results', () => {
+    expect(formatMemories([])).toBe('[]');
   });
 });
