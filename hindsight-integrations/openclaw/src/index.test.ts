@@ -1,5 +1,6 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { stripMemoryTags, extractRecallQuery, formatMemories } from './index.js';
+import plugin from './index.js';
 import type { MemoryResult } from './types.js';
 
 // ---------------------------------------------------------------------------
@@ -180,5 +181,73 @@ describe('formatMemories', () => {
 
   it('handles empty results', () => {
     expect(formatMemories([])).toBe('[]');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// autoRecall = false test
+// ---------------------------------------------------------------------------
+
+describe('autoRecall disabled', () => {
+  it('respects autoRecall = false and skips recall', async () => {
+    const api = {
+      config: {
+        plugins: {
+          entries: {
+            'hindsight-openclaw': {
+              config: {
+                llmProvider: 'openai-codex',
+                autoRecall: false
+              }
+            }
+          }
+        }
+      },
+      registerService: vi.fn(),
+      on: vi.fn(),
+    } as any;
+
+    // Load plugin
+    plugin(api);
+
+    // Get the hook handler
+    const beforeAgentStartHook = api.on.mock.calls.find(call => call[0] === 'before_agent_start')?.[1];
+    expect(beforeAgentStartHook).toBeDefined();
+
+    // Call the hook
+    const result = await beforeAgentStartHook({ rawMessage: 'test', prompt: 'test' }, { agentId: 'agent' });
+
+    // Result should be undefined (nothing prepended)
+    expect(result).toBeUndefined();
+  });
+
+  it('respects auto_recall = false (snake_case) and skips recall', async () => {
+    const api = {
+      config: {
+        plugins: {
+          entries: {
+            'hindsight-openclaw': {
+              config: {
+                llmProvider: 'openai-codex',
+                auto_recall: false
+              }
+            }
+          }
+        }
+      },
+      registerService: vi.fn(),
+      on: vi.fn(),
+    } as any;
+
+    // Load plugin
+    plugin(api);
+
+    // Get the hook handler
+    const beforeAgentStartHook = api.on.mock.calls.find(call => call[0] === 'before_agent_start')?.[1];
+
+    // Call the hook
+    const result = await beforeAgentStartHook({ rawMessage: 'test', prompt: 'test' }, { agentId: 'agent' });
+
+    expect(result).toBeUndefined();
   });
 });

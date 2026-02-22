@@ -233,14 +233,10 @@ export function deriveBankId(
   ctx: PluginHookAgentContext | undefined,
   pluginConfig: PluginConfig
 ): string {
-  // Use either camelCase or snake_case for dynamicBankId check
-  const dynamicEnabled = (pluginConfig.dynamicBankId ?? (pluginConfig as any).dynamic_bank_id) !== false;
-  const prefix = pluginConfig.bankIdPrefix || (pluginConfig as any).bank_id_prefix;
-
   // If dynamic bank ID is disabled, use static bank
-  if (!dynamicEnabled) {
-    return prefix
-      ? `${prefix}-${DEFAULT_BANK_NAME}`
+  if (pluginConfig.dynamicBankId === false) {
+    return pluginConfig.bankIdPrefix
+      ? `${pluginConfig.bankIdPrefix}-${DEFAULT_BANK_NAME}`
       : DEFAULT_BANK_NAME;
   }
 
@@ -250,8 +246,8 @@ export function deriveBankId(
 
   // Build bank ID: {prefix?}-{agentId}-{channelType}-{userId}
   const baseBankId = `${agentId}-${channelType}-${userId}`;
-  return prefix
-    ? `${prefix}-${baseBankId}`
+  return pluginConfig.bankIdPrefix
+    ? `${pluginConfig.bankIdPrefix}-${baseBankId}`
     : baseBankId;
 }
 

@@ -66,18 +66,17 @@ describe('deriveBankId', () => {
     expect(bankId).toBe('my-app-openclaw');
   });
 
-  it('handles snake_case aliases in config', () => {
+  it('handles normalized config properties', () => {
     const ctx = {
       agentId: 'agent1',
       messageProvider: 'discord',
       senderId: 'user456',
     };
-    const config = {
-      dynamic_bank_id: true,
-      bank_id_prefix: 'prod',
-    } as any;
+    const config: PluginConfig = {
+      dynamicBankId: true,
+      bankIdPrefix: 'prod',
+    };
     const bankId = deriveBankId(ctx, config);
-    // Note: getPluginConfig normally handles the mapping, but deriveBankId uses PluginConfig which we updated to be robust
     expect(bankId).toBe('prod-agent1-discord-user456');
   });
 });
