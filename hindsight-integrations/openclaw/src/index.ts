@@ -873,8 +873,18 @@ User message: ${prompt}
         console.log(`[Hindsight Hook] agent_end triggered - bank: ${bankId}`);
 
         // Check event success and messages
-        if (!event.success || !Array.isArray(event.messages) || event.messages.length === 0) {
-          console.log('[Hindsight Hook] Skipping: success:', event.success, 'messages:', event.messages?.length);
+        // Support success being undefined (treat as success). Skip ONLY if success is explicitly false.
+        const isSuccess = event.success !== false;
+
+        // Try multiple paths for messages (event.messages, event.context.sessionEntry.messages, etc.)
+        const messages = Array.isArray(event.messages) && event.messages.length > 0
+          ? event.messages
+          : Array.isArray(event.context?.sessionEntry?.messages)
+          ? event.context.sessionEntry.messages
+          : null;
+
+        if (!isSuccess || !messages || messages.length === 0) {
+          console.log('[Hindsight Hook] Skipping: success:', event.success, 'messages found:', !!messages, 'count:', messages?.length);
           return;
         }
 
@@ -895,19 +905,29 @@ User message: ${prompt}
         }
 
         // Format messages into a transcript
-        const transcript = event.messages
+        const transcript = messages
           .map((msg: any) => {
-            const role = msg.role || 'unknown';
+            let role = 'unknown';
             let content = '';
 
-            // Handle different content formats
-            if (typeof msg.content === 'string') {
-              content = msg.content;
-            } else if (Array.isArray(msg.content)) {
-              content = msg.content
-                .filter((block: any) => block.type === 'text')
-                .map((block: any) => block.text)
-                .join('\n');
+            // Handle different message formats
+            if (typeof msg === 'string') {
+              // Simple string format
+              content = msg;
+            } else if (msg && typeof msg === 'object') {
+              role = msg.role || 'unknown';
+              // Handle content string or content blocks array
+              if (typeof msg.content === 'string') {
+                content = msg.content;
+              } else if (Array.isArray(msg.content)) {
+                content = msg.content
+                  .filter((block: any) => block.type === 'text')
+                  .map((block: any) => block.text)
+                  .join('\n');
+              } else if (msg.text) {
+                // Some hook formats use .text instead of .content
+                content = msg.text;
+              }
             }
 
             // Strip plugin-injected memory tags to prevent feedback loop
@@ -932,14 +952,14 @@ User message: ${prompt}
           document_id: documentId,
           metadata: {
             retained_at: new Date().toISOString(),
-            message_count: String(event.messages.length),
+            message_count: String(messages.length),
             channel_type: effectiveCtx?.messageProvider,
             channel_id: effectiveCtx?.channelId,
             sender_id: effectiveCtx?.senderId,
           },
         });
 
-        console.log(`[Hindsight] Retained ${event.messages.length} messages to bank ${bankId} for session ${documentId}`);
+        console.log(`[Hindsight] Retained ${messages.length} messages to bank ${bankId} for session ${documentId}`);
       } catch (error) {
         console.error('[Hindsight] Error retaining messages:', error);
       }

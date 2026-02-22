@@ -251,3 +251,108 @@ describe('autoRecall disabled', () => {
     expect(result).toBeUndefined();
   });
 });
+
+// ---------------------------------------------------------------------------
+// agent_end hook robustness
+// ---------------------------------------------------------------------------
+
+describe('agent_end robustness', () => {
+  it('handles lenient success and fallback messages', async () => {
+    const api = {
+      config: {
+        plugins: {
+          entries: {
+            'hindsight-openclaw': {
+              config: {
+                llmProvider: 'openai-codex'
+              }
+            }
+          }
+        }
+      },
+      registerService: vi.fn(),
+      on: vi.fn(),
+    } as any;
+
+    // Load plugin
+    plugin(api);
+
+    // Get the agent_end hook handler
+    const agentEndHook = api.on.mock.calls.find(call => call[0] === 'agent_end')?.[1];
+    expect(agentEndHook).toBeDefined();
+
+    // Mock client
+    const mockClient = {
+      retain: vi.fn().mockResolvedValue({}),
+      setBankId: vi.fn(),
+    };
+    (global as any).__hindsightClient = {
+      waitForReady: vi.fn().mockResolvedValue(undefined),
+      getClientForContext: vi.fn().mockResolvedValue(mockClient),
+    };
+
+    // Test case: success is undefined, messages in context
+    const event = {
+      // success: undefined
+      context: {
+        sessionEntry: {
+          messages: ['Hello world']
+        }
+      }
+    };
+
+    await agentEndHook(event, { agentId: 'agent1' });
+
+    expect(mockClient.retain).toHaveBeenCalled();
+    const retainArgs = mockClient.retain.mock.calls[0][0];
+    expect(retainArgs.content).toContain('Hello world');
+  });
+
+  it('handles string messages vs object messages', async () => {
+    const api = {
+      config: {
+        plugins: {
+          entries: {
+            'hindsight-openclaw': {
+              config: {
+                llmProvider: 'openai-codex'
+              }
+            }
+          }
+        }
+      },
+      registerService: vi.fn(),
+      on: vi.fn(),
+    } as any;
+
+    plugin(api);
+    const agentEndHook = api.on.mock.calls.find(call => call[0] === 'agent_end')?.[1];
+
+    const mockClient = {
+      retain: vi.fn().mockResolvedValue({}),
+      setBankId: vi.fn(),
+    };
+    (global as any).__hindsightClient = {
+      waitForReady: vi.fn().mockResolvedValue(undefined),
+      getClientForContext: vi.fn().mockResolvedValue(mockClient),
+    };
+
+    // Test case: mixed format messages
+    const event = {
+      success: true,
+      messages: [
+        'String message',
+        { role: 'assistant', content: 'Object message' },
+        { role: 'user', text: 'Text property message' }
+      ]
+    };
+
+    await agentEndHook(event, { agentId: 'agent1' });
+
+    expect(mockClient.retain).toHaveBeenCalled();
+    const retainArgs = mockClient.retain.mock.calls[0][0];
+    expect(retainArgs.content).toContain('String message');
+    expect(retainArgs.content).toContain('Object message');
+    expect(retainArgs.content).toContain('Text property message');
+  });
+});
