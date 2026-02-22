@@ -233,10 +233,14 @@ export function deriveBankId(
   ctx: PluginHookAgentContext | undefined,
   pluginConfig: PluginConfig
 ): string {
+  // Use either camelCase or snake_case for dynamicBankId check
+  const dynamicEnabled = (pluginConfig.dynamicBankId ?? (pluginConfig as any).dynamic_bank_id) !== false;
+  const prefix = pluginConfig.bankIdPrefix || (pluginConfig as any).bank_id_prefix;
+
   // If dynamic bank ID is disabled, use static bank
-  if (pluginConfig.dynamicBankId === false) {
-    return pluginConfig.bankIdPrefix
-      ? `${pluginConfig.bankIdPrefix}-${DEFAULT_BANK_NAME}`
+  if (!dynamicEnabled) {
+    return prefix
+      ? `${prefix}-${DEFAULT_BANK_NAME}`
       : DEFAULT_BANK_NAME;
   }
 
@@ -246,8 +250,8 @@ export function deriveBankId(
 
   // Build bank ID: {prefix?}-{agentId}-{channelType}-{userId}
   const baseBankId = `${agentId}-${channelType}-${userId}`;
-  return pluginConfig.bankIdPrefix
-    ? `${pluginConfig.bankIdPrefix}-${baseBankId}`
+  return prefix
+    ? `${prefix}-${baseBankId}`
     : baseBankId;
 }
 
@@ -300,6 +304,9 @@ function detectLLMConfig(pluginConfig?: PluginConfig): {
   if (pluginConfig?.llmProvider) {
     const providerInfo = PROVIDER_DETECTION.find(p => p.name === pluginConfig.llmProvider);
 
+    // Prioritize baseUrl from plugin config
+    const baseUrl = pluginConfig.llmBaseUrl || overrideBaseUrl;
+
     // Resolve API key: llmApiKeyEnv > provider's standard keyEnv
     let apiKey = '';
     if (pluginConfig.llmApiKeyEnv) {
@@ -323,7 +330,7 @@ function detectLLMConfig(pluginConfig?: PluginConfig): {
       provider: pluginConfig.llmProvider,
       apiKey,
       model: pluginConfig.llmModel || overrideModel || providerInfo?.defaultModel,
-      baseUrl: overrideBaseUrl,
+      baseUrl,
       source: 'plugin config',
     };
   }
@@ -433,27 +440,33 @@ async function checkExternalApiHealth(apiUrl: string): Promise<void> {
   }
 }
 
-function getPluginConfig(api: MoltbotPluginAPI): PluginConfig {
-  const config = api.config.plugins?.entries?.['hindsight-openclaw']?.config || {};
+export function getPluginConfig(api: MoltbotPluginAPI): PluginConfig {
+  const config = (api.config.plugins?.entries?.['hindsight-openclaw']?.config || {}) as any;
   const defaultMission = 'You are an AI assistant helping users across multiple communication channels (Telegram, Slack, Discord, etc.). Remember user preferences, instructions, and important context from conversations to provide personalized assistance.';
 
   return {
-    bankMission: config.bankMission || defaultMission,
-    embedPort: config.embedPort || 0,
-    daemonIdleTimeout: config.daemonIdleTimeout !== undefined ? config.daemonIdleTimeout : 0,
-    embedVersion: config.embedVersion || 'latest',
-    embedPackagePath: config.embedPackagePath,
-    llmProvider: config.llmProvider,
-    llmModel: config.llmModel,
-    llmApiKeyEnv: config.llmApiKeyEnv,
-    hindsightApiUrl: config.hindsightApiUrl,
-    hindsightApiToken: config.hindsightApiToken,
-    apiPort: config.apiPort || 9077,
+    bankMission: config.bankMission || config.bank_mission || defaultMission,
+    embedPort: config.embedPort ?? config.embed_port ?? 0,
+    daemonIdleTimeout: config.daemonIdleTimeout ?? config.daemon_idle_timeout ?? 0,
+    embedVersion: config.embedVersion || config.embed_version || 'latest',
+    embedPackagePath: config.embedPackagePath || config.embed_package_path,
+    llmProvider: config.llmProvider || config.llm_provider,
+    llmModel: config.llmModel || config.llm_model,
+    llmApiKeyEnv: config.llmApiKeyEnv || config.llm_api_key_env,
+    llmBaseUrl: config.llmBaseUrl || config.llm_base_url,
+    hindsightApiUrl: config.hindsightApiUrl || config.hindsight_api_url,
+    hindsightApiToken: config.hindsightApiToken || config.hindsight_api_token,
+    apiPort: config.apiPort || config.api_port || 9077,
     // Dynamic bank ID options (default: enabled)
-    dynamicBankId: config.dynamicBankId !== false,
-    bankIdPrefix: config.bankIdPrefix,
-    excludeProviders: Array.isArray(config.excludeProviders) ? config.excludeProviders : [],
-    autoRecall: config.autoRecall !== false, // Default: true (on) — backward compatible
+    dynamicBankId: (config.dynamicBankId ?? config.dynamic_bank_id) !== false,
+    bankIdPrefix: config.bankIdPrefix || config.bank_id_prefix,
+    excludeProviders: Array.isArray(config.excludeProviders)
+      ? config.excludeProviders
+      : Array.isArray(config.exclude_providers)
+      ? config.exclude_providers
+      : [],
+    autoRecall: (config.autoRecall ?? config.auto_recall) !== false, // Default: true (on)
+    autoRetain: (config.autoRetain ?? config.auto_retain) !== false, // Default: true (on)
   };
 }
 
@@ -831,6 +844,12 @@ User message: ${prompt}
     // Hook signature: (event, ctx) where event has {messages, success, error?, durationMs?}
     api.on('agent_end', async (event: any, ctx?: PluginHookAgentContext) => {
       try {
+        // Skip auto-retain when disabled
+        if (!pluginConfig.autoRetain) {
+          console.log('[Hindsight] Auto-retain disabled via config, skipping');
+          return;
+        }
+
         // Use context from this hook, or fall back to context captured in before_agent_start
         const effectiveCtx = ctx || currentAgentContext;
 

@@ -69,6 +69,15 @@
         "description": "Automatically recall memories on every prompt and inject them as context. Set to false when agent has its own recall tool.",
         "default": true
       },
+      "autoRetain": {
+        "type": "boolean",
+        "description": "Automatically capture and store conversations as memories.",
+        "default": true
+      },
+      "llmBaseUrl": {
+        "type": "string",
+        "description": "Custom base URL for LLM API (e.g. OpenRouter, Azure, or local vLLM)."
+      },
       "excludeProviders": {
         "type": "array",
         "items": { "type": "string" },
@@ -133,6 +142,14 @@
     "autoRecall": {
       "label": "Auto-Recall",
       "placeholder": "true (inject memories on every prompt)"
+    },
+    "autoRetain": {
+      "label": "Auto-Retain",
+      "placeholder": "true (capture memories automatically)"
+    },
+    "llmBaseUrl": {
+      "label": "LLM Base URL",
+      "placeholder": "e.g. https://openrouter.ai/api/v1 (optional)"
     },
     "excludeProviders": {
       "label": "Excluded Providers",

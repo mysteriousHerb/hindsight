@@ -44,6 +44,8 @@ export interface PluginConfig {
   bankIdPrefix?: string; // Prefix for bank IDs (e.g. 'prod' -> 'prod-slack-C123')
   excludeProviders?: string[]; // Message providers to exclude from recall/retain (e.g. ['telegram', 'discord'])
   autoRecall?: boolean; // Auto-recall memories on every prompt (default: true). Set to false when agent has its own recall tool.
+  autoRetain?: boolean; // Auto-retain memories after every interaction (default: true).
+  llmBaseUrl?: string; // LLM base URL (e.g. 'https://api.openai.com/v1' or OpenRouter URL)
 }
 
 export interface ServiceConfig {
