@@ -266,12 +266,15 @@ const PROVIDER_DETECTION = [
   { name: 'claude-code', keyEnv: '', defaultModel: 'claude-sonnet-4-5-20250929' },
 ];
 
-function detectLLMConfig(pluginConfig?: PluginConfig): {
-  provider: string;
-  apiKey: string;
+function detectLLMConfig(
+  pluginConfig?: PluginConfig,
+  isExternal?: boolean,
+): {
+  provider?: string;
+  apiKey?: string;
   model?: string;
   baseUrl?: string;
-  source: string;
+  source?: string;
 } {
   // Override values from HINDSIGHT_API_LLM_* env vars (highest priority)
   const overrideProvider = process.env.HINDSIGHT_API_LLM_PROVIDER;
@@ -356,7 +359,12 @@ function detectLLMConfig(pluginConfig?: PluginConfig): {
     }
   }
 
-  // No configuration found - show helpful error
+  // No configuration found
+  if (isExternal) {
+    return { source: 'external mode' };
+  }
+
+  // Show helpful error
   throw new Error(
     `No LLM configuration found for Hindsight memory plugin.\n\n` +
     `Option 1: Set a standard provider API key (auto-detect):\n` +
@@ -395,7 +403,7 @@ function detectExternalApi(pluginConfig?: PluginConfig): {
  * Build HindsightClientOptions from LLM config, plugin config, and external API settings.
  */
 function buildClientOptions(
-  llmConfig: { provider: string; apiKey: string; model?: string },
+  llmConfig: { provider?: string; apiKey?: string; model?: string },
   pluginCfg: PluginConfig,
   externalApi: { apiUrl: string | null; apiToken: string | null },
 ): HindsightClientOptions {
@@ -474,24 +482,32 @@ export default function (api: MoltbotPluginAPI) {
   try {
     console.log('[Hindsight] Plugin loading...');
 
-    // Get plugin config first (needed for LLM detection)
+    // Get plugin config first
     console.log('[Hindsight] Getting plugin config...');
     const pluginConfig = getPluginConfig(api);
 
     // Store config globally for bank ID derivation in hooks
     currentPluginConfig = pluginConfig;
 
+    // Detect external API mode
+    const externalApi = detectExternalApi(pluginConfig);
+    const isExternal = !!externalApi.apiUrl;
+
     // Detect LLM configuration (env vars > plugin config > auto-detect)
     console.log('[Hindsight] Detecting LLM config...');
-    const llmConfig = detectLLMConfig(pluginConfig);
+    const llmConfig = detectLLMConfig(pluginConfig, isExternal);
 
     const baseUrlInfo = llmConfig.baseUrl ? `, base URL: ${llmConfig.baseUrl}` : '';
     const modelInfo = llmConfig.model || 'default';
 
-    if (llmConfig.provider === 'ollama') {
-      console.log(`[Hindsight] ✓ Using provider: ${llmConfig.provider}, model: ${modelInfo} (${llmConfig.source})`);
-    } else {
-      console.log(`[Hindsight] ✓ Using provider: ${llmConfig.provider}, model: ${modelInfo} (${llmConfig.source}${baseUrlInfo})`);
+    if (llmConfig.provider) {
+      if (llmConfig.provider === 'ollama') {
+        console.log(`[Hindsight] ✓ Using provider: ${llmConfig.provider}, model: ${modelInfo} (${llmConfig.source})`);
+      } else {
+        console.log(`[Hindsight] ✓ Using provider: ${llmConfig.provider}, model: ${modelInfo} (${llmConfig.source}${baseUrlInfo})`);
+      }
+    } else if (isExternal) {
+      console.log('[Hindsight] Using external API mode without local LLM configuration');
     }
     if (pluginConfig.bankMission) {
       console.log(`[Hindsight] Custom bank mission configured: "${pluginConfig.bankMission.substring(0, 50)}..."`);
@@ -504,9 +520,6 @@ export default function (api: MoltbotPluginAPI) {
     } else {
       console.log(`[Hindsight] Dynamic bank IDs disabled - using static bank: ${DEFAULT_BANK_NAME}`);
     }
-
-    // Detect external API mode
-    const externalApi = detectExternalApi(pluginConfig);
 
     // Get API port from config (default: 9077)
     const apiPort = pluginConfig.apiPort || 9077;
@@ -559,8 +572,8 @@ export default function (api: MoltbotPluginAPI) {
           console.log('[Hindsight] Creating HindsightEmbedManager...');
           embedManager = new HindsightEmbedManager(
             apiPort,
-            llmConfig.provider,
-            llmConfig.apiKey,
+            llmConfig.provider!,
+            llmConfig.apiKey!,
             llmConfig.model,
             llmConfig.baseUrl,
             pluginConfig.daemonIdleTimeout,
@@ -654,8 +667,8 @@ export default function (api: MoltbotPluginAPI) {
           console.log('[Hindsight] Reinitializing...');
           const reinitPluginConfig = getPluginConfig(api);
           currentPluginConfig = reinitPluginConfig;
-          const llmConfig = detectLLMConfig(reinitPluginConfig);
           const externalApi = detectExternalApi(reinitPluginConfig);
+          const llmConfig = detectLLMConfig(reinitPluginConfig, !!externalApi.apiUrl);
           const apiPort = reinitPluginConfig.apiPort || 9077;
 
           if (externalApi.apiUrl) {
@@ -682,8 +695,8 @@ export default function (api: MoltbotPluginAPI) {
             // Local daemon mode
             embedManager = new HindsightEmbedManager(
               apiPort,
-              llmConfig.provider,
-              llmConfig.apiKey,
+              llmConfig.provider!,
+              llmConfig.apiKey!,
               llmConfig.model,
               llmConfig.baseUrl,
               reinitPluginConfig.daemonIdleTimeout,
