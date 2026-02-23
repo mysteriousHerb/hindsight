@@ -62,7 +62,7 @@ async function lazyReinit(): Promise<void> {
       process.env.HINDSIGHT_EMBED_API_TOKEN = externalApi.apiToken;
     }
 
-    const llmConfig = detectLLMConfig(config);
+    const llmConfig = detectLLMConfig(config, !!externalApi.apiUrl);
     client = new HindsightClient(buildClientOptions(llmConfig, config, externalApi));
     const defaultBankId = deriveBankId(undefined, config);
     client.setBankId(defaultBankId);
