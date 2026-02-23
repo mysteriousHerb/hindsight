@@ -154,11 +154,12 @@ export function stripMemoryTags(content: string): string {
  * Keeps only text and temporal context.
  */
 export function formatMemories(memories: MemoryResult[]): string {
-  const cleaned = memories.map(r => ({
-    text: r.text,
-    mentioned_at: r.mentioned_at,
-  }));
-  return JSON.stringify(cleaned, null, 2);
+  return memories
+    .map(r => {
+      const date = r.mentioned_at ? ` (${r.mentioned_at})` : '';
+      return `- ${r.text}${date}`;
+    })
+    .join('\n');
 }
 
 /**
@@ -830,8 +831,6 @@ export default function (api: MoltbotPluginAPI) {
         const contextMessage = `<hindsight_memories>
 Relevant memories from past conversations (prioritize recent when conflicting):
 ${memoriesJson}
-
-User message: ${prompt}
 </hindsight_memories>`;
 
         console.log(`[Hindsight] Auto-recall: Injecting ${response.results.length} memories from bank ${bankId}`);
@@ -904,19 +903,27 @@ User message: ${prompt}
           return;
         }
 
+        // Filter to only user/assistant messages (skip system, tool, function roles)
+        // Then take only the last 10 to avoid re-retaining old content
+        const relevantMessages = messages
+          .filter((msg: any) => {
+            if (typeof msg === 'string') return true;
+            const role = msg?.role;
+            return role === 'user' || role === 'assistant';
+          })
+          .slice(-10);
+
         // Format messages into a transcript
-        const transcript = messages
+        const transcript = relevantMessages
           .map((msg: any) => {
             let role = 'unknown';
             let content = '';
 
             // Handle different message formats
             if (typeof msg === 'string') {
-              // Simple string format
               content = msg;
             } else if (msg && typeof msg === 'object') {
               role = msg.role || 'unknown';
-              // Handle content string or content blocks array
               if (typeof msg.content === 'string') {
                 content = msg.content;
               } else if (Array.isArray(msg.content)) {
@@ -925,7 +932,6 @@ User message: ${prompt}
                   .map((block: any) => block.text)
                   .join('\n');
               } else if (msg.text) {
-                // Some hook formats use .text instead of .content
                 content = msg.text;
               }
             }
@@ -952,14 +958,14 @@ User message: ${prompt}
           document_id: documentId,
           metadata: {
             retained_at: new Date().toISOString(),
-            message_count: String(messages.length),
+            message_count: String(relevantMessages.length),
             channel_type: effectiveCtx?.messageProvider,
             channel_id: effectiveCtx?.channelId,
             sender_id: effectiveCtx?.senderId,
           },
         });
 
-        console.log(`[Hindsight] Retained ${messages.length} messages to bank ${bankId} for session ${documentId}`);
+        console.log(`[Hindsight] Retained ${relevantMessages.length} messages to bank ${bankId} for session ${documentId}`);
       } catch (error) {
         console.error('[Hindsight] Error retaining messages:', error);
       }

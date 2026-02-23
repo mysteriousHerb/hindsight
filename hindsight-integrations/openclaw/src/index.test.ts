@@ -149,7 +149,7 @@ describe('extractRecallQuery', () => {
 // ---------------------------------------------------------------------------
 
 describe('formatMemories', () => {
-  it('strips unhelpful metadata and keeps only text and mentioned_at', () => {
+  it('formats memories as bullet list with only text and date', () => {
     const memories: MemoryResult[] = [
       {
         id: 'mem_1',
@@ -167,20 +167,37 @@ describe('formatMemories', () => {
       },
     ];
 
-    const result = JSON.parse(formatMemories(memories));
+    const result = formatMemories(memories);
 
-    expect(result).toHaveLength(1);
-    expect(result[0]).toEqual({
-      text: 'User likes pizza',
-      mentioned_at: '2023-01-01T10:00:00Z',
-    });
-    expect(result[0].id).toBeUndefined();
-    expect(result[0].type).toBeUndefined();
-    expect(result[0].metadata).toBeUndefined();
+    expect(result).toBe('- User likes pizza (2023-01-01T10:00:00Z)');
+    expect(result).not.toContain('mem_1');
+    expect(result).not.toContain('fact');
+    expect(result).not.toContain('bar');
+  });
+
+  it('omits date when mentioned_at is null', () => {
+    const memories: MemoryResult[] = [
+      {
+        id: 'mem_2',
+        text: 'User prefers dark mode',
+        type: 'fact',
+        entities: [],
+        context: '',
+        occurred_start: null,
+        occurred_end: null,
+        mentioned_at: null,
+        document_id: null,
+        metadata: null,
+        chunk_id: null,
+        tags: [],
+      },
+    ];
+
+    expect(formatMemories(memories)).toBe('- User prefers dark mode');
   });
 
   it('handles empty results', () => {
-    expect(formatMemories([])).toBe('[]');
+    expect(formatMemories([])).toBe('');
   });
 });
 
