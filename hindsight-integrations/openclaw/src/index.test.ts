@@ -173,6 +173,11 @@ describe('prepareRetentionTranscript', () => {
     retainRoles: ['user', 'assistant'],
   };
 
+  it('returns null for null or undefined messages', () => {
+    expect(prepareRetentionTranscript(null as any, baseConfig)).toBeNull();
+    expect(prepareRetentionTranscript(undefined as any, baseConfig)).toBeNull();
+  });
+
   it('returns null if no user message found (turn boundary)', () => {
     const messages = [
       { role: 'assistant', content: 'Hello' },

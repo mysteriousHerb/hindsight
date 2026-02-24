@@ -917,6 +917,11 @@ export function prepareRetentionTranscript(
   messages: any[],
   pluginConfig: PluginConfig
 ): { transcript: string; messageCount: number } | null {
+  // Guard against null/undefined messages
+  if (!messages) {
+    return null;
+  }
+
   // Turn boundary detection: find the last user message
   const lastUserIdx = messages.findLastIndex((m: any) => m.role === 'user');
   if (lastUserIdx === -1) {
