@@ -1,4 +1,4 @@
-import type { MoltbotPluginAPI, PluginConfig } from './types.js';
+import type { MoltbotPluginAPI, PluginConfig, PluginHookAgentContext, MemoryResult } from './types.js';
 import { HindsightEmbedManager } from './embed-manager.js';
 import { HindsightClient, type HindsightClientOptions } from './client.js';
 import { dirname } from 'path';
@@ -203,40 +203,42 @@ export function extractRecallQuery(
  * Agent context passed to plugin hooks.
  * These fields are populated by OpenClaw when invoking hooks.
  */
-interface PluginHookAgentContext {
-  agentId?: string;
-  sessionKey?: string;
-  workspaceDir?: string;
-  messageProvider?: string;
-  channelId?: string;
-  senderId?: string;
-}
-
 /**
  * Derive a bank ID from the agent context.
  * Creates per-user banks: {messageProvider}-{senderId}
  * Falls back to default bank when context is unavailable.
  */
-function deriveBankId(
-  ctx: PluginHookAgentContext | undefined,
-  pluginConfig: PluginConfig
-): string {
-  // If dynamic bank ID is disabled, use static bank
-  if (pluginConfig.dynamicBankId === false) {
-    return pluginConfig.bankIdPrefix
-      ? `${pluginConfig.bankIdPrefix}-${DEFAULT_BANK_NAME}`
-      : DEFAULT_BANK_NAME;
-  }
+export function deriveBankId(ctx: PluginHookAgentContext | undefined, pluginConfig: PluginConfig): string {
+  if (!pluginConfig.dynamicBankId) return 'openclaw';
 
-  const channelType = ctx?.messageProvider || 'unknown';
-  const userId = ctx?.senderId || 'default';
+  const fields = pluginConfig.isolationFields || ['agent', 'channel', 'user'];
 
-  // Build bank ID: {prefix?}-{channelType}-{senderId}
-  const baseBankId = `${channelType}-${userId}`;
+  const fieldMap: Record<string, string> = {
+    agent: ctx?.agentId || 'default',
+    channel: ctx?.channelId || 'unknown',
+    user: ctx?.senderId || 'anonymous',
+  };
+
+  const baseBankId = fields
+    .map(f => fieldMap[f] || 'unknown')
+    .join('-');
+
   return pluginConfig.bankIdPrefix
     ? `${pluginConfig.bankIdPrefix}-${baseBankId}`
     : baseBankId;
 }
+
+
+export function formatMemories(results: MemoryResult[]): string {
+  if (!results || results.length === 0) return '';
+  return results
+    .map(r => {
+      const date = r.mentioned_at ? ` (${r.mentioned_at})` : '';
+      return `- ${r.text}${date}`;
+    })
+    .join('\n');
+}
+
 
 // Provider detection from standard env vars
 const PROVIDER_DETECTION = [
@@ -250,8 +252,8 @@ const PROVIDER_DETECTION = [
 ];
 
 function detectLLMConfig(pluginConfig?: PluginConfig): {
-  provider: string;
-  apiKey: string;
+  provider?: string;
+  apiKey?: string;
   model?: string;
   baseUrl?: string;
   source: string;
@@ -337,6 +339,18 @@ function detectLLMConfig(pluginConfig?: PluginConfig): {
   }
 
   // No configuration found - show helpful error
+
+  // Allow empty LLM config if using external Hindsight API (server handles LLM)
+  if (pluginConfig?.hindsightApiUrl) {
+    return {
+      provider: undefined,
+      apiKey: undefined,
+      model: undefined,
+      baseUrl: undefined,
+      source: 'external-api-mode-no-llm',
+    };
+  }
+
   throw new Error(
     `No LLM configuration found for Hindsight memory plugin.\n\n` +
     `Option 1: Set a standard provider API key (auto-detect):\n` +
@@ -375,7 +389,7 @@ function detectExternalApi(pluginConfig?: PluginConfig): {
  * Build HindsightClientOptions from LLM config, plugin config, and external API settings.
  */
 function buildClientOptions(
-  llmConfig: { provider: string; apiKey: string; model?: string },
+  llmConfig: { provider?: string; apiKey?: string; model?: string },
   pluginCfg: PluginConfig,
   externalApi: { apiUrl: string | null; apiToken: string | null },
 ): HindsightClientOptions {
@@ -790,11 +804,11 @@ export default function (api: MoltbotPluginAPI) {
         }
 
         // Format memories as JSON with all fields from recall
-        const memoriesJson = JSON.stringify(response.results, null, 2);
+        const memoriesFormatted = formatMemories(response.results);
 
         const contextMessage = `<hindsight_memories>
 Relevant memories from past conversations (prioritize recent when conflicting):
-${memoriesJson}
+${memoriesFormatted}
 
 User message: ${prompt}
 </hindsight_memories>`;
@@ -831,11 +845,17 @@ User message: ${prompt}
         const bankId = deriveBankId(effectiveCtx, pluginConfig);
         console.log(`[Hindsight Hook] agent_end triggered - bank: ${bankId}`);
 
-        // Check event success and messages
-        if (!event.success || !Array.isArray(event.messages) || event.messages.length === 0) {
-          console.log('[Hindsight Hook] Skipping: success:', event.success, 'messages:', event.messages?.length);
+        if (pluginConfig.autoRetain === false) {
+          console.log('[Hindsight Hook] autoRetain is disabled, skipping retention');
           return;
         }
+
+        const retention = prepareRetentionTranscript(event.messages, pluginConfig);
+        if (!retention) {
+          console.log('[Hindsight Hook] No messages to retain (filtered/short/no-user)');
+          return;
+        }
+        const { transcript, messageCount } = retention;
 
         // Wait for client to be ready
         const clientGlobal = (global as any).__hindsightClient;
@@ -853,33 +873,6 @@ User message: ${prompt}
           return;
         }
 
-        // Format messages into a transcript
-        const transcript = event.messages
-          .map((msg: any) => {
-            const role = msg.role || 'unknown';
-            let content = '';
-
-            // Handle different content formats
-            if (typeof msg.content === 'string') {
-              content = msg.content;
-            } else if (Array.isArray(msg.content)) {
-              content = msg.content
-                .filter((block: any) => block.type === 'text')
-                .map((block: any) => block.text)
-                .join('\n');
-            }
-
-            // Strip plugin-injected memory tags to prevent feedback loop
-            content = stripMemoryTags(content);
-
-            return `[role: ${role}]\n${content}\n[${role}:end]`;
-          })
-          .join('\n\n');
-
-        if (!transcript.trim() || transcript.length < 10) {
-          console.log('[Hindsight Hook] Transcript too short, skipping');
-          return;
-        }
 
         // Use unique document ID per conversation (sessionKey + timestamp)
         // Static sessionKey (e.g. "agent:main:main") causes CASCADE delete of old memories
@@ -891,14 +884,14 @@ User message: ${prompt}
           document_id: documentId,
           metadata: {
             retained_at: new Date().toISOString(),
-            message_count: String(event.messages.length),
+            message_count: String(messageCount),
             channel_type: effectiveCtx?.messageProvider,
             channel_id: effectiveCtx?.channelId,
             sender_id: effectiveCtx?.senderId,
           },
         });
 
-        console.log(`[Hindsight] Retained ${event.messages.length} messages to bank ${bankId} for session ${documentId}`);
+        console.log(`[Hindsight] Retained ${messageCount} messages to bank ${bankId} for session ${documentId}`);
       } catch (error) {
         console.error('[Hindsight] Error retaining messages:', error);
       }
@@ -914,6 +907,57 @@ User message: ${prompt}
 }
 
 // Export client getter for tools
+
+export function prepareRetentionTranscript(
+  messages: any[],
+  pluginConfig: PluginConfig
+): { transcript: string; messageCount: number } | null {
+  // Turn boundary detection: find the last user message
+  const lastUserIdx = messages.findLastIndex((m: any) => m.role === 'user');
+  if (lastUserIdx === -1) {
+    return null; // No user message found in turn
+  }
+  const currentTurnMessages = messages.slice(lastUserIdx);
+
+  // Role filtering
+  const allowedRoles = new Set(pluginConfig.retainRoles || ['user', 'assistant']);
+  const filteredMessages = currentTurnMessages.filter((m: any) => allowedRoles.has(m.role));
+
+  if (filteredMessages.length === 0) {
+    return null; // No messages to retain
+  }
+
+  // Format messages into a transcript
+  const transcript = filteredMessages
+    .map((msg: any) => {
+      const role = msg.role || 'unknown';
+      let content = '';
+
+      // Handle different content formats
+      if (typeof msg.content === 'string') {
+        content = msg.content;
+      } else if (Array.isArray(msg.content)) {
+        content = msg.content
+          .filter((block: any) => block.type === 'text')
+          .map((block: any) => block.text)
+          .join('\n');
+      }
+
+      // Strip plugin-injected memory tags to prevent feedback loop
+      content = stripMemoryTags(content);
+
+      return `[role: ${role}]\n${content}\n[${role}:end]`;
+    })
+    .join('\n\n');
+
+  if (!transcript.trim() || transcript.length < 10) {
+    return null; // Transcript too short
+  }
+
+  return { transcript, messageCount: filteredMessages.length };
+}
+
+
 export function getClient() {
   return client;
 }

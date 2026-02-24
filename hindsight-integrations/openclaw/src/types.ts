@@ -28,6 +28,15 @@ export interface MoltbotConfig {
   };
 }
 
+export interface PluginHookAgentContext {
+  agentId?: string;
+  sessionKey?: string;
+  workspaceDir?: string;
+  messageProvider?: string;
+  channelId?: string;
+  senderId?: string;
+}
+
 export interface PluginConfig {
   bankMission?: string;
   embedPort?: number;
@@ -44,6 +53,9 @@ export interface PluginConfig {
   bankIdPrefix?: string; // Prefix for bank IDs (e.g. 'prod' -> 'prod-slack-C123')
   excludeProviders?: string[]; // Message providers to exclude from recall/retain (e.g. ['telegram', 'discord'])
   autoRecall?: boolean; // Auto-recall memories on every prompt (default: true). Set to false when agent has its own recall tool.
+  isolationFields?: string[]; // Subset of ['agent', 'channel', 'user']. Default: ['agent', 'channel', 'user']
+  autoRetain?: boolean; // Default: true
+  retainRoles?: string[]; // Roles to include in retained transcript. Default: ['user', 'assistant']
 }
 
 export interface ServiceConfig {
