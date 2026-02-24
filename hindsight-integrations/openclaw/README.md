@@ -30,6 +30,26 @@ That's it! The plugin will automatically start capturing and recalling memories.
 - **Memory isolation** — configurable per agent, channel, user, or provider via `isolationFields`
 - **Retention controls** — choose which message roles to retain and toggle auto-retain on/off
 
+## Configuration
+
+Optional settings in `~/.openclaw/openclaw.json` under `plugins.entries.hindsight-openclaw.config`:
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `apiPort` | `9077` | Port for the local Hindsight daemon |
+| `daemonIdleTimeout` | `0` | Seconds before daemon shuts down from inactivity (0 = never) |
+| `embedVersion` | `"latest"` | hindsight-embed version |
+| `bankMission` | — | Custom context for the memory bank |
+| `dynamicBankId` | `true` | Enable per-context memory banks |
+| `bankIdPrefix` | — | Prefix for bank IDs (e.g. `"prod"`) |
+| `isolationFields` | `["agent", "channel", "user"]` | Fields used to derive bank ID. Options: `agent`, `channel`, `user`, `provider` |
+| `excludeProviders` | `[]` | Message providers to skip for recall/retain |
+| `autoRecall` | `true` | Auto-inject memories before each turn. Set to `false` when the agent has its own recall tool. |
+| `autoRetain` | `true` | Auto-retain conversations after each turn |
+| `retainRoles` | `["user", "assistant"]` | Which message roles to retain |
+| `hindsightApiUrl` | — | External Hindsight API URL (skips local daemon) |
+| `hindsightApiToken` | — | Auth token for external API |
+
 ## Documentation
 
 For full documentation, configuration options, troubleshooting, and development guide, see:
