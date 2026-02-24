@@ -74,4 +74,22 @@ describe('deriveBankId', () => {
     const bankId = deriveBankId(ctx, config);
     expect(bankId).toBe('openclaw');
   });
+
+  it('should handle undefined context with fallback values', () => {
+    const config: PluginConfig = { dynamicBankId: true };
+    const bankId = deriveBankId(undefined, config);
+    expect(bankId).toBe('default-unknown-anonymous');
+  });
+
+  it('should handle empty isolationFields array', () => {
+    const config: PluginConfig = { ...baseConfig, isolationFields: [] };
+    const bankId = deriveBankId(ctx, config);
+    expect(bankId).toBe('');
+  });
+
+  it('should handle empty isolationFields with prefix', () => {
+    const config: PluginConfig = { ...baseConfig, isolationFields: [], bankIdPrefix: 'prod' };
+    const bankId = deriveBankId(ctx, config);
+    expect(bankId).toBe('prod-');
+  });
 });
