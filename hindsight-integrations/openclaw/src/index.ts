@@ -200,18 +200,16 @@ export function extractRecallQuery(
 }
 
 /**
- * Agent context passed to plugin hooks.
- * These fields are populated by OpenClaw when invoking hooks.
- */
-/**
  * Derive a bank ID from the agent context.
- * Creates per-user banks: {messageProvider}-{senderId}
+ * Uses configurable isolationFields to determine bank segmentation.
  * Falls back to default bank when context is unavailable.
  */
 export function deriveBankId(ctx: PluginHookAgentContext | undefined, pluginConfig: PluginConfig): string {
-  if (!pluginConfig.dynamicBankId) return 'openclaw';
+  if (!pluginConfig.dynamicBankId) {
+    return pluginConfig.bankIdPrefix ? `${pluginConfig.bankIdPrefix}-openclaw` : 'openclaw';
+  }
 
-  const fields = pluginConfig.isolationFields || ['agent', 'channel', 'user'];
+  const fields = pluginConfig.isolationFields?.length ? pluginConfig.isolationFields : ['agent', 'channel', 'user'];
 
   const fieldMap: Record<string, string> = {
     agent: ctx?.agentId || 'default',
@@ -456,6 +454,9 @@ function getPluginConfig(api: MoltbotPluginAPI): PluginConfig {
     bankIdPrefix: config.bankIdPrefix,
     excludeProviders: Array.isArray(config.excludeProviders) ? config.excludeProviders : [],
     autoRecall: config.autoRecall !== false, // Default: true (on) — backward compatible
+    isolationFields: Array.isArray(config.isolationFields) ? config.isolationFields : undefined,
+    autoRetain: config.autoRetain !== false, // Default: true
+    retainRoles: Array.isArray(config.retainRoles) ? config.retainRoles : undefined,
   };
 }
 
@@ -846,6 +847,11 @@ User message: ${prompt}
         const bankId = deriveBankId(effectiveCtx, pluginConfig);
         console.log(`[Hindsight Hook] agent_end triggered - bank: ${bankId}`);
 
+        if (event.success === false) {
+          console.log('[Hindsight Hook] Agent run failed, skipping retention');
+          return;
+        }
+
         if (pluginConfig.autoRetain === false) {
           console.log('[Hindsight Hook] autoRetain is disabled, skipping retention');
           return;
@@ -913,6 +919,10 @@ export function prepareRetentionTranscript(
   messages: any[],
   pluginConfig: PluginConfig
 ): { transcript: string; messageCount: number } | null {
+  if (!messages || messages.length === 0) {
+    return null;
+  }
+
   // Turn boundary detection: find the last user message
   let lastUserIdx = -1;
   for (let i = messages.length - 1; i >= 0; i--) {
