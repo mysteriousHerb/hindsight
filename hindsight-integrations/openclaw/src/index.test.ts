@@ -141,6 +141,27 @@ describe('extractRecallQuery', () => {
     const result = extractRecallQuery('   What is my job?   ', undefined);
     expect(result).toBe('What is my job?');
   });
+
+  it('rejects OpenClaw untrusted metadata messages as rawMessage', () => {
+    const result = extractRecallQuery('Conversation info (untrusted metadata):', undefined);
+    expect(result).toBeNull();
+  });
+
+  it('rejects untrusted metadata even when prompt is also metadata', () => {
+    const result = extractRecallQuery(
+      'Conversation info (untrusted metadata):',
+      'Conversation info (untrusted metadata): some details',
+    );
+    expect(result).toBeNull();
+  });
+
+  it('falls back to prompt when rawMessage is metadata', () => {
+    const result = extractRecallQuery(
+      'Conversation info (untrusted metadata):',
+      'How many cats do I have?',
+    );
+    expect(result).toBe('How many cats do I have?');
+  });
 });
 
 
@@ -151,11 +172,11 @@ describe('extractRecallQuery', () => {
 describe('formatMemories', () => {
   it('formats memories as a bulleted list', () => {
     const memories: MemoryResult[] = [
-      { id: '1', text: 'User prefers dark mode', mentioned_at: '2023-01-01T12:00:00Z' } as any,
-      { id: '2', text: 'User is learning Rust', mentioned_at: null } as any,
+      { id: '1', text: 'User prefers dark mode', type: 'world', mentioned_at: '2023-01-01T12:00:00Z' } as any,
+      { id: '2', text: 'User is learning Rust', type: 'experience', mentioned_at: null } as any,
     ];
     const output = formatMemories(memories);
-    expect(output).toBe('- User prefers dark mode (2023-01-01T12:00:00Z)\n- User is learning Rust');
+    expect(output).toBe('- User prefers dark mode [world] (2023-01-01T12:00:00Z)\n- User is learning Rust [experience]');
   });
 
   it('returns empty string for empty memories', () => {
@@ -226,6 +247,21 @@ describe('prepareRetentionTranscript', () => {
     expect(result?.transcript).not.toContain('<hindsight_memories>');
     expect(result?.transcript).not.toContain('User prefers dark mode');
     expect(result?.transcript).toContain('Here is how to enable dark mode.');
+  });
+
+  it('strips memory tags from user message when prependContext is prepended to it', () => {
+    // Simulates the host prepending prependContext to the user message content
+    const userContent = `<hindsight_memories>\nRelevant memories:\n- User prefers dark mode [world]\n\nUser message: What is dark mode?\n</hindsight_memories>\nWhat is dark mode?`;
+    const messages = [
+      { role: 'user', content: userContent },
+      { role: 'assistant', content: 'Dark mode is a display setting.' }
+    ];
+    const result = prepareRetentionTranscript(messages, baseConfig);
+    expect(result).not.toBeNull();
+    expect(result?.transcript).not.toContain('<hindsight_memories>');
+    expect(result?.transcript).not.toContain('User prefers dark mode');
+    expect(result?.transcript).toContain('What is dark mode?');
+    expect(result?.transcript).toContain('Dark mode is a display setting.');
   });
 
   it('reports accurate messageCount excluding empty messages', () => {

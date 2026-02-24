@@ -22,6 +22,13 @@ import type { RecallResponse } from './types.js';
 const inflightRecalls = new Map<string, Promise<RecallResponse>>();
 const RECALL_TIMEOUT_MS = 10_000;
 
+// Guard against double hook registration (host may call plugin factory more than once)
+let hooksRegistered = false;
+
+// Per-bank recent message history for multi-round recall queries
+const recentMessagesByBank = new Map<string, string[]>();
+const MAX_STORED_RECALL_ROUNDS = 10;
+
 // Cooldown + guard to prevent concurrent reinit attempts
 let lastReinitAttempt = 0;
 let isReinitInProgress = false;
@@ -161,8 +168,16 @@ export function extractRecallQuery(
   rawMessage: string | undefined,
   prompt: string | undefined,
 ): string | null {
+  // Reject known metadata/system message patterns — these are not user queries
+  const METADATA_PATTERNS = [
+    /^\s*conversation info\s*\(untrusted metadata\)/i,
+    /^\s*\(untrusted metadata\)/i,
+    /^\s*system:/i,
+  ];
+  const isMetadata = (s: string) => METADATA_PATTERNS.some(p => p.test(s));
+
   let recallQuery = rawMessage;
-  if (!recallQuery || typeof recallQuery !== 'string' || recallQuery.trim().length < 5) {
+  if (!recallQuery || typeof recallQuery !== 'string' || recallQuery.trim().length < 5 || isMetadata(recallQuery)) {
     recallQuery = prompt;
     if (!recallQuery || typeof recallQuery !== 'string' || recallQuery.length < 5) {
       return null;
@@ -195,7 +210,7 @@ export function extractRecallQuery(
   }
 
   const trimmed = recallQuery.trim();
-  if (trimmed.length < 5) return null;
+  if (trimmed.length < 5 || isMetadata(trimmed)) return null;
   return trimmed;
 }
 
@@ -265,8 +280,9 @@ export function formatMemories(results: MemoryResult[]): string {
   if (!results || results.length === 0) return '';
   return results
     .map(r => {
+      const type = r.type ? ` [${r.type}]` : '';
       const date = r.mentioned_at ? ` (${r.mentioned_at})` : '';
-      return `- ${r.text}${date}`;
+      return `- ${r.text}${type}${date}`;
     })
     .join('\n');
 }
@@ -495,6 +511,7 @@ function getPluginConfig(api: MoltbotPluginAPI): PluginConfig {
     retainRoles: Array.isArray(config.retainRoles) ? config.retainRoles : undefined,
     recallBudget: config.recallBudget || 'mid',
     recallMaxTokens: config.recallMaxTokens || 2048,
+    recallRounds: typeof config.recallRounds === 'number' ? Math.max(1, Math.min(config.recallRounds, MAX_STORED_RECALL_ROUNDS)) : 1,
   };
 }
 
@@ -759,6 +776,11 @@ export default function (api: MoltbotPluginAPI) {
     console.log('[Hindsight] Plugin loaded successfully');
 
     // Register agent hooks for auto-recall and auto-retention
+    if (hooksRegistered) {
+      console.log('[Hindsight] Hooks already registered, skipping duplicate registration');
+      return;
+    }
+    hooksRegistered = true;
     console.log('[Hindsight] Registering agent hooks...');
 
     // Store session key and context for retention
@@ -798,6 +820,16 @@ export default function (api: MoltbotPluginAPI) {
           return;
         }
         let prompt = extracted;
+
+        // Multi-round recall: prepend recent messages from previous turns for richer context
+        const recallRounds = pluginConfig.recallRounds ?? 1;
+        if (recallRounds > 1) {
+          const history = recentMessagesByBank.get(bankId) || [];
+          const prevMessages = history.slice(-(recallRounds - 1));
+          if (prevMessages.length > 0) {
+            prompt = [...prevMessages, prompt].join('\n');
+          }
+        }
 
         // Truncate — Hindsight API recall has a 500 token limit; 800 chars stays safely under even with non-ASCII
         const MAX_RECALL_QUERY_CHARS = 800;
@@ -854,6 +886,14 @@ User message: ${prompt}
 </hindsight_memories>`;
 
         console.log(`[Hindsight] Auto-recall: Injecting ${response.results.length} memories from bank ${bankId}`);
+
+        // Save current message to per-bank history for future multi-round recall
+        if (recallRounds > 1) {
+          const history = recentMessagesByBank.get(bankId) || [];
+          history.push(extracted);
+          if (history.length > MAX_STORED_RECALL_ROUNDS) history.shift();
+          recentMessagesByBank.set(bankId, history);
+        }
 
         // Inject context before the user message
         return { prependContext: contextMessage };
