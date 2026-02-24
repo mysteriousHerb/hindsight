@@ -217,6 +217,7 @@ export function deriveBankId(ctx: PluginHookAgentContext | undefined, pluginConf
     agent: ctx?.agentId || 'default',
     channel: ctx?.channelId || 'unknown',
     user: ctx?.senderId || 'anonymous',
+    provider: ctx?.messageProvider || 'unknown',
   };
 
   const baseBankId = fields

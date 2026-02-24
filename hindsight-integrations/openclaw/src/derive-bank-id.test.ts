@@ -43,6 +43,18 @@ describe('deriveBankId', () => {
     expect(bankId).toBe('channel-456');
   });
 
+  it('should support ["provider"] isolation', () => {
+    const config: PluginConfig = { ...baseConfig, isolationFields: ['provider'] };
+    const bankId = deriveBankId(ctx, config);
+    expect(bankId).toBe('slack');
+  });
+
+  it('should support mixed fields including provider', () => {
+    const config: PluginConfig = { ...baseConfig, isolationFields: ['provider', 'user'] };
+    const bankId = deriveBankId(ctx, config);
+    expect(bankId).toBe('slack-user-789');
+  });
+
   it('should prepend bankIdPrefix if set', () => {
     const config: PluginConfig = { ...baseConfig, bankIdPrefix: 'prod' };
     const bankId = deriveBankId(ctx, config);

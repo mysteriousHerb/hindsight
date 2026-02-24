@@ -91,7 +91,8 @@
           "enum": [
             "agent",
             "channel",
-            "user"
+            "user",
+            "provider"
           ]
         },
         "description": "Fields used to derive bank ID. Controls memory isolation granularity. Default: ['agent', 'channel', 'user'].",
