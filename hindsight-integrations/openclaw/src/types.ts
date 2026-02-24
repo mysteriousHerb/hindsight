@@ -46,7 +46,12 @@ export interface PluginConfig {
   excludeProviders?: string[]; // Message providers to exclude from recall/retain (e.g. ['telegram', 'discord'])
   autoRecall?: boolean; // Auto-recall memories on every prompt (default: true). Set to false when agent has its own recall tool.
   recallBudget?: 'low' | 'mid' | 'high'; // Budget for recall (default: 'mid')
+  recallMaxTokens?: number; // Max tokens for recall results (default: 1024)
+  recallTimeoutMs?: number; // Timeout for recall (default: 10000)
   useReflect?: boolean; // Use reflect instead of recall for auto-recall (default: false)
+  reflectBudget?: 'low' | 'mid' | 'high'; // Budget for reflect (default: 'mid')
+  reflectMaxTokens?: number; // Max tokens for reflect response (default: 1024)
+  reflectTimeoutMs?: number; // Timeout for reflect (default: 30000)
   autoRetain?: boolean; // Auto-retain memories after every interaction (default: true).
   llmBaseUrl?: string; // LLM base URL (e.g. 'https://api.openai.com/v1' or OpenRouter URL)
 }

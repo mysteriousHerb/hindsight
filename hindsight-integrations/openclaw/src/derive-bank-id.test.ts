@@ -87,6 +87,8 @@ describe('deriveBankId', () => {
     expect(bankId).toBe('prod-agent1-discord-user456');
   });
 
+  // Isolation Strategy Tests
+
   it('supports "agent" isolation strategy', () => {
     const config: PluginConfig = { ...defaultConfig, isolationStrategy: 'agent' };
     expect(deriveBankId(testCtx, config)).toBe('my-agent');
@@ -117,7 +119,7 @@ describe('deriveBankId', () => {
     expect(deriveBankId(testCtx, config)).toBe('C123-U456');
   });
 
-  it('supports "agent_channel_user" isolation strategy', () => {
+  it('supports "agent_channel_user" isolation strategy (default legacy)', () => {
     const config: PluginConfig = { ...defaultConfig, isolationStrategy: 'agent_channel_user' };
     expect(deriveBankId(testCtx, config)).toBe('my-agent-slack-U456');
   });
@@ -129,5 +131,30 @@ describe('deriveBankId', () => {
       bankIdPrefix: 'prod',
     };
     expect(deriveBankId(testCtx, config)).toBe('prod-C123');
+  });
+
+  // Strict channel fallback tests
+
+  it('fallback for missing channelId in strict "channel" strategy is "unknown", not messageProvider', () => {
+    const dmCtx = {
+      agentId: 'my-agent',
+      messageProvider: 'slack',
+      // channelId missing
+      senderId: 'U456',
+    };
+    const config: PluginConfig = { ...defaultConfig, isolationStrategy: 'channel' };
+    expect(deriveBankId(dmCtx, config)).toBe('unknown'); // Should NOT be 'slack'
+  });
+
+  it('fallback for missing channelId in legacy "agent_channel_user" strategy remains messageProvider', () => {
+    const dmCtx = {
+      agentId: 'my-agent',
+      messageProvider: 'slack',
+      // channelId missing
+      senderId: 'U456',
+    };
+    const config: PluginConfig = { ...defaultConfig, isolationStrategy: 'agent_channel_user' };
+    // Legacy format: agent-provider-user
+    expect(deriveBankId(dmCtx, config)).toBe('my-agent-slack-U456');
   });
 });

@@ -242,9 +242,14 @@ export function deriveBankId(
   }
 
   const agentId = ctx?.agentId || 'default';
-  const channelType = ctx?.messageProvider || 'unknown';
   const userId = ctx?.senderId || 'default';
-  const channelId = ctx?.channelId || ctx?.messageProvider || 'unknown';
+
+  // Strict channel ID (e.g. C12345). If missing (e.g. DM), we use 'unknown'
+  // or a placeholder, NOT the provider name, to avoid merging all channels.
+  const strictChannelId = ctx?.channelId || 'unknown';
+
+  // For legacy compatibility, we need the message provider (e.g. 'slack')
+  const messageProvider = ctx?.messageProvider || 'unknown';
 
   const strategy = pluginConfig.isolationStrategy || 'agent_channel_user';
   let baseBankId = '';
@@ -257,21 +262,22 @@ export function deriveBankId(
       baseBankId = userId;
       break;
     case 'channel':
-      baseBankId = channelId;
+      baseBankId = strictChannelId;
       break;
     case 'agent_user':
       baseBankId = `${agentId}-${userId}`;
       break;
     case 'agent_channel':
-      baseBankId = `${agentId}-${channelId}`;
+      baseBankId = `${agentId}-${strictChannelId}`;
       break;
     case 'channel_user':
-      baseBankId = `${channelId}-${userId}`;
+      baseBankId = `${strictChannelId}-${userId}`;
       break;
     case 'agent_channel_user':
     default:
       // Legacy behavior: agent-provider-user
-      baseBankId = `${agentId}-${channelType}-${userId}`;
+      // We continue to use messageProvider here for backward compatibility
+      baseBankId = `${agentId}-${messageProvider}-${userId}`;
       break;
   }
 
@@ -500,8 +506,13 @@ export function getPluginConfig(api: MoltbotPluginAPI): PluginConfig {
       ? config.exclude_providers
       : [],
     autoRecall: (config.autoRecall ?? config.auto_recall) !== false, // Default: true (on)
-    recallBudget: config.recallBudget || config.recall_budget,
+    recallBudget: config.recallBudget || config.recall_budget || 'mid',
+    recallMaxTokens: config.recallMaxTokens || config.recall_max_tokens || 1024,
+    recallTimeoutMs: config.recallTimeoutMs || config.recall_timeout_ms || 10000,
     useReflect: (config.useReflect ?? config.use_reflect) === true,
+    reflectBudget: config.reflectBudget || config.reflect_budget || 'mid',
+    reflectMaxTokens: config.reflectMaxTokens || config.reflect_max_tokens || 1024,
+    reflectTimeoutMs: config.reflectTimeoutMs || config.reflect_timeout_ms || 30000,
     autoRetain: (config.autoRetain ?? config.auto_retain) !== false, // Default: true (on)
   };
 }
@@ -850,9 +861,9 @@ export default function (api: MoltbotPluginAPI) {
           } else {
             reflectPromise = client.reflect({
               query: prompt,
-              budget: pluginConfig.recallBudget,
-              max_tokens: 1024
-            }, RECALL_TIMEOUT_MS * 3); // Reflect takes longer
+              budget: pluginConfig.reflectBudget,
+              max_tokens: pluginConfig.reflectMaxTokens
+            }, pluginConfig.reflectTimeoutMs);
             inflightRecalls.set(recallKey, reflectPromise);
             void reflectPromise.catch(() => {}).finally(() => inflightRecalls.delete(recallKey));
           }
@@ -875,8 +886,8 @@ ${response.text}
             recallPromise = client.recall({
               query: prompt,
               budget: pluginConfig.recallBudget,
-              max_tokens: 1024
-            }, RECALL_TIMEOUT_MS);
+              max_tokens: pluginConfig.recallMaxTokens
+            }, pluginConfig.recallTimeoutMs);
             inflightRecalls.set(recallKey, recallPromise);
             void recallPromise.catch(() => {}).finally(() => inflightRecalls.delete(recallKey));
           }
@@ -903,9 +914,9 @@ ${memoriesJson}
         return { prependContext: contextMessage };
       } catch (error) {
         if (error instanceof DOMException && error.name === 'TimeoutError') {
-          console.warn(`[Hindsight] Auto-recall timed out after ${RECALL_TIMEOUT_MS}ms, skipping memory injection`);
+          console.warn(`[Hindsight] Auto-recall timed out after ${pluginConfig.recallTimeoutMs}ms, skipping memory injection`);
         } else if (error instanceof Error && error.name === 'AbortError') {
-          console.warn(`[Hindsight] Auto-recall aborted after ${RECALL_TIMEOUT_MS}ms, skipping memory injection`);
+          console.warn(`[Hindsight] Auto-recall aborted after ${pluginConfig.recallTimeoutMs}ms, skipping memory injection`);
         } else {
           console.error('[Hindsight] Auto-recall error:', error);
         }

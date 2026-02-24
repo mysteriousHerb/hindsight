@@ -440,7 +440,8 @@ describe('autoReflect', () => {
               config: {
                 llmProvider: 'openai-codex',
                 useReflect: true,
-                recallBudget: 'high'
+                reflectBudget: 'high',
+                reflectMaxTokens: 2048,
               }
             }
           }
@@ -470,7 +471,7 @@ describe('autoReflect', () => {
     const reflectArgs = mockClient.reflect.mock.calls[0][0];
     expect(reflectArgs.query).toBe('What do I like?');
     expect(reflectArgs.budget).toBe('high');
-    expect(reflectArgs.max_tokens).toBe(1024);
+    expect(reflectArgs.max_tokens).toBe(2048); // Uses configured max_tokens
 
     expect(mockClient.recall).not.toHaveBeenCalled();
 
