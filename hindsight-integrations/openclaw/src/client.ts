@@ -275,27 +275,34 @@ export class HindsightClient {
   }
 
   private async reflectHttp(request: ReflectRequest, timeoutMs?: number): Promise<ReflectResponse> {
-    const url = `${this.apiUrl}/v1/default/banks/${encodeURIComponent(this.bankId)}/memories/reflect`;
+    // Correct endpoint: /v1/default/banks/{bankId}/reflect (not /memories/reflect)
+    const url = `${this.apiUrl}/v1/default/banks/${encodeURIComponent(this.bankId)}/reflect`;
 
     // Defense-in-depth: truncate query to stay under API's 500-token limit
-    const MAX_QUERY_CHARS = 800;
-    const query = request.query.length > MAX_QUERY_CHARS
-      ? (console.warn(`[Hindsight] Truncating reflect query from ${request.query.length} to ${MAX_QUERY_CHARS} chars`),
-         request.query.substring(0, MAX_QUERY_CHARS))
-      : request.query;
+    // We use a configurable or safe default here if not provided.
+    // Ideally this limit should be dynamic or higher, but keeping safe default for now.
+    const MAX_QUERY_CHARS = 2000;
+    let query = request.query;
+    if (query.length > MAX_QUERY_CHARS) {
+      console.warn(`[Hindsight] Truncating reflect query from ${request.query.length} to ${MAX_QUERY_CHARS} chars`);
+      query = query.substring(0, MAX_QUERY_CHARS);
+    }
 
     const body = {
       query,
-      budget: request.budget || 'mid',
+      budget: request.budget,
       context: request.context,
       max_tokens: request.max_tokens,
     };
+
+    // Default timeout for reflect operations (longer than recall)
+    const REFLECT_TIMEOUT_MS = 30_000;
 
     const res = await fetch(url, {
       method: 'POST',
       headers: this.httpHeaders(),
       body: JSON.stringify(body),
-      signal: AbortSignal.timeout(timeoutMs ?? 60_000), // Reflect might take longer
+      signal: AbortSignal.timeout(timeoutMs ?? REFLECT_TIMEOUT_MS),
     });
 
     if (!res.ok) {
@@ -321,10 +328,13 @@ export class HindsightClient {
       args.push('--max-tokens', String(request.max_tokens));
     }
 
+    // Default timeout for reflect operations (longer than recall)
+    const REFLECT_TIMEOUT_MS = 60_000;
+
     try {
       const { stdout } = await execFileAsync(cmd, args, {
         maxBuffer: MAX_BUFFER,
-        timeout: timeoutMs ?? 60_000, // Reflect involves LLM generation, might take longer
+        timeout: timeoutMs ?? REFLECT_TIMEOUT_MS,
       });
 
       return JSON.parse(stdout) as ReflectResponse;
