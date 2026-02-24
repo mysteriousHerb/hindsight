@@ -214,25 +214,27 @@ interface PluginHookAgentContext {
 
 /**
  * Derive a bank ID from the agent context.
- * Creates per-user banks: {messageProvider}-{senderId}
- * Falls back to default bank when context is unavailable.
+ * Uses isolationFields to determine which context fields to include.
+ * Default: ['agent', 'channel', 'user']
  */
-function deriveBankId(
+export function deriveBankId(
   ctx: PluginHookAgentContext | undefined,
   pluginConfig: PluginConfig
 ): string {
-  // If dynamic bank ID is disabled, use static bank
-  if (pluginConfig.dynamicBankId === false) {
-    return pluginConfig.bankIdPrefix
-      ? `${pluginConfig.bankIdPrefix}-${DEFAULT_BANK_NAME}`
-      : DEFAULT_BANK_NAME;
-  }
+  if (!pluginConfig.dynamicBankId) return 'openclaw';
 
-  const channelType = ctx?.messageProvider || 'unknown';
-  const userId = ctx?.senderId || 'default';
+  const fields = pluginConfig.isolationFields || ['agent', 'channel', 'user'];
 
-  // Build bank ID: {prefix?}-{channelType}-{senderId}
-  const baseBankId = `${channelType}-${userId}`;
+  const fieldMap: Record<string, string> = {
+    agent: ctx?.agentId || 'default',
+    channel: ctx?.channelId || 'unknown',
+    user: ctx?.senderId || 'anonymous',
+  };
+
+  const baseBankId = fields
+    .map(f => fieldMap[f] || 'unknown')
+    .join('-');
+
   return pluginConfig.bankIdPrefix
     ? `${pluginConfig.bankIdPrefix}-${baseBankId}`
     : baseBankId;
