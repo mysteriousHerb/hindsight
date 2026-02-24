@@ -41,9 +41,17 @@ export interface PluginConfig {
   hindsightApiUrl?: string; // External Hindsight API URL (skips local daemon when set)
   hindsightApiToken?: string; // API token for external Hindsight API authentication
   dynamicBankId?: boolean; // Enable per-channel memory banks (default: true)
+  isolationStrategy?: 'agent' | 'user' | 'channel' | 'agent_user' | 'agent_channel' | 'channel_user' | 'agent_channel_user';
   bankIdPrefix?: string; // Prefix for bank IDs (e.g. 'prod' -> 'prod-slack-C123')
   excludeProviders?: string[]; // Message providers to exclude from recall/retain (e.g. ['telegram', 'discord'])
   autoRecall?: boolean; // Auto-recall memories on every prompt (default: true). Set to false when agent has its own recall tool.
+  recallBudget?: 'low' | 'mid' | 'high'; // Budget for recall (default: 'mid')
+  recallMaxTokens?: number; // Max tokens for recall results (default: 1024)
+  recallTimeoutMs?: number; // Timeout for recall (default: 10000)
+  useReflect?: boolean; // Use reflect instead of recall for auto-recall (default: false)
+  reflectBudget?: 'low' | 'mid' | 'high'; // Budget for reflect (default: 'mid')
+  reflectMaxTokens?: number; // Max tokens for reflect response (default: 1024)
+  reflectTimeoutMs?: number; // Timeout for reflect (default: 30000)
   autoRetain?: boolean; // Auto-retain memories after every interaction (default: true).
   llmBaseUrl?: string; // LLM base URL (e.g. 'https://api.openai.com/v1' or OpenRouter URL)
 }
@@ -71,6 +79,7 @@ export interface RetainResponse {
 export interface RecallRequest {
   query: string;
   max_tokens?: number;
+  budget?: 'low' | 'mid' | 'high';
 }
 
 export interface RecallResponse {
@@ -78,6 +87,21 @@ export interface RecallResponse {
   entities: Record<string, unknown> | null;
   trace: unknown | null;
   chunks: unknown | null;
+}
+
+export interface ReflectRequest {
+  query: string;
+  budget?: 'low' | 'mid' | 'high';
+  context?: string;
+  max_tokens?: number;
+}
+
+export interface ReflectResponse {
+  text: string;
+  based_on?: {
+    memories: MemoryResult[];
+  };
+  structured_output?: any;
 }
 
 export interface MemoryResult {

@@ -18,8 +18,8 @@ let currentPluginConfig: PluginConfig | null = null;
 const banksWithMissionSet = new Set<string>();
 
 // In-flight recall deduplication: concurrent recalls for the same bank reuse one promise
-import type { RecallResponse } from './types.js';
-const inflightRecalls = new Map<string, Promise<RecallResponse>>();
+import type { RecallResponse, ReflectResponse } from './types.js';
+const inflightRecalls = new Map<string, Promise<RecallResponse | ReflectResponse>>();
 const RECALL_TIMEOUT_MS = 10_000;
 
 // Cooldown + guard to prevent concurrent reinit attempts
@@ -242,11 +242,45 @@ export function deriveBankId(
   }
 
   const agentId = ctx?.agentId || 'default';
-  const channelType = ctx?.messageProvider || 'unknown';
   const userId = ctx?.senderId || 'default';
 
-  // Build bank ID: {prefix?}-{agentId}-{channelType}-{userId}
-  const baseBankId = `${agentId}-${channelType}-${userId}`;
+  // Strict channel ID (e.g. C12345). If missing (e.g. DM), we use 'unknown'
+  // or a placeholder, NOT the provider name, to avoid merging all channels.
+  const strictChannelId = ctx?.channelId || 'unknown';
+
+  // For legacy compatibility, we need the message provider (e.g. 'slack')
+  const messageProvider = ctx?.messageProvider || 'unknown';
+
+  const strategy = pluginConfig.isolationStrategy || 'agent_channel_user';
+  let baseBankId = '';
+
+  switch (strategy) {
+    case 'agent':
+      baseBankId = agentId;
+      break;
+    case 'user':
+      baseBankId = userId;
+      break;
+    case 'channel':
+      baseBankId = strictChannelId;
+      break;
+    case 'agent_user':
+      baseBankId = `${agentId}-${userId}`;
+      break;
+    case 'agent_channel':
+      baseBankId = `${agentId}-${strictChannelId}`;
+      break;
+    case 'channel_user':
+      baseBankId = `${strictChannelId}-${userId}`;
+      break;
+    case 'agent_channel_user':
+    default:
+      // Legacy behavior: agent-provider-user
+      // We continue to use messageProvider here for backward compatibility
+      baseBankId = `${agentId}-${messageProvider}-${userId}`;
+      break;
+  }
+
   return pluginConfig.bankIdPrefix
     ? `${pluginConfig.bankIdPrefix}-${baseBankId}`
     : baseBankId;
@@ -464,6 +498,7 @@ export function getPluginConfig(api: MoltbotPluginAPI): PluginConfig {
     apiPort: config.apiPort || config.api_port || 9077,
     // Dynamic bank ID options (default: enabled)
     dynamicBankId: (config.dynamicBankId ?? config.dynamic_bank_id) !== false,
+    isolationStrategy: config.isolationStrategy || config.isolation_strategy,
     bankIdPrefix: config.bankIdPrefix || config.bank_id_prefix,
     excludeProviders: Array.isArray(config.excludeProviders)
       ? config.excludeProviders
@@ -471,6 +506,13 @@ export function getPluginConfig(api: MoltbotPluginAPI): PluginConfig {
       ? config.exclude_providers
       : [],
     autoRecall: (config.autoRecall ?? config.auto_recall) !== false, // Default: true (on)
+    recallBudget: config.recallBudget || config.recall_budget || 'mid',
+    recallMaxTokens: config.recallMaxTokens || config.recall_max_tokens || 1024,
+    recallTimeoutMs: config.recallTimeoutMs || config.recall_timeout_ms || 10000,
+    useReflect: (config.useReflect ?? config.use_reflect) === true,
+    reflectBudget: config.reflectBudget || config.reflect_budget || 'mid',
+    reflectMaxTokens: config.reflectMaxTokens || config.reflect_max_tokens || 1024,
+    reflectTimeoutMs: config.reflectTimeoutMs || config.reflect_timeout_ms || 30000,
     autoRetain: (config.autoRetain ?? config.auto_retain) !== false, // Default: true (on)
   };
 }
@@ -808,40 +850,73 @@ export default function (api: MoltbotPluginAPI) {
         // Recall with deduplication: reuse in-flight request for same bank
         const recallKey = bankId;
         const existing = inflightRecalls.get(recallKey);
-        let recallPromise: Promise<RecallResponse>;
-        if (existing) {
-          console.log(`[Hindsight] Reusing in-flight recall for bank ${bankId}`);
-          recallPromise = existing;
+
+        let contextMessage = '';
+
+        if (pluginConfig.useReflect) {
+          let reflectPromise: Promise<ReflectResponse>;
+          if (existing) {
+            console.log(`[Hindsight] Reusing in-flight reflect for bank ${bankId}`);
+            reflectPromise = existing as Promise<ReflectResponse>;
+          } else {
+            reflectPromise = client.reflect({
+              query: prompt,
+              budget: pluginConfig.reflectBudget,
+              max_tokens: pluginConfig.reflectMaxTokens
+            }, pluginConfig.reflectTimeoutMs);
+            inflightRecalls.set(recallKey, reflectPromise);
+            void reflectPromise.catch(() => {}).finally(() => inflightRecalls.delete(recallKey));
+          }
+
+          const response = await reflectPromise;
+
+          // Format reflection response
+          contextMessage = `<hindsight_memories>
+Relevant context and memories:
+${response.text}
+</hindsight_memories>`;
+          console.log(`[Hindsight] Auto-reflect: Injected reflection for bank ${bankId}`);
+
         } else {
-          recallPromise = client.recall({ query: prompt, max_tokens: 2048 }, RECALL_TIMEOUT_MS);
-          inflightRecalls.set(recallKey, recallPromise);
-          void recallPromise.catch(() => {}).finally(() => inflightRecalls.delete(recallKey));
-        }
+          let recallPromise: Promise<RecallResponse>;
+          if (existing) {
+            console.log(`[Hindsight] Reusing in-flight recall for bank ${bankId}`);
+            recallPromise = existing as Promise<RecallResponse>;
+          } else {
+            recallPromise = client.recall({
+              query: prompt,
+              budget: pluginConfig.recallBudget,
+              max_tokens: pluginConfig.recallMaxTokens
+            }, pluginConfig.recallTimeoutMs);
+            inflightRecalls.set(recallKey, recallPromise);
+            void recallPromise.catch(() => {}).finally(() => inflightRecalls.delete(recallKey));
+          }
 
-        const response = await recallPromise;
+          const response = await recallPromise;
 
-        if (!response.results || response.results.length === 0) {
-          console.log('[Hindsight] No memories found for auto-recall');
-          return;
-        }
+          if (!response.results || response.results.length === 0) {
+            console.log('[Hindsight] No memories found for auto-recall');
+            return;
+          }
 
-        // Format memories - keep only relevant fields (text, mentioned_at)
-        const memoriesJson = formatMemories(response.results);
+          // Format memories - keep only relevant fields (text, mentioned_at)
+          const memoriesJson = formatMemories(response.results);
 
-        const contextMessage = `<hindsight_memories>
+          contextMessage = `<hindsight_memories>
 Relevant memories from past conversations (prioritize recent when conflicting):
 ${memoriesJson}
 </hindsight_memories>`;
 
-        console.log(`[Hindsight] Auto-recall: Injecting ${response.results.length} memories from bank ${bankId}`);
+          console.log(`[Hindsight] Auto-recall: Injecting ${response.results.length} memories from bank ${bankId}`);
+        }
 
         // Inject context before the user message
         return { prependContext: contextMessage };
       } catch (error) {
         if (error instanceof DOMException && error.name === 'TimeoutError') {
-          console.warn(`[Hindsight] Auto-recall timed out after ${RECALL_TIMEOUT_MS}ms, skipping memory injection`);
+          console.warn(`[Hindsight] Auto-recall timed out after ${pluginConfig.recallTimeoutMs}ms, skipping memory injection`);
         } else if (error instanceof Error && error.name === 'AbortError') {
-          console.warn(`[Hindsight] Auto-recall aborted after ${RECALL_TIMEOUT_MS}ms, skipping memory injection`);
+          console.warn(`[Hindsight] Auto-recall aborted after ${pluginConfig.recallTimeoutMs}ms, skipping memory injection`);
         } else {
           console.error('[Hindsight] Auto-recall error:', error);
         }
@@ -904,17 +979,40 @@ ${memoriesJson}
         }
 
         // Filter to only user/assistant messages (skip system, tool, function roles)
-        // Then take only the last 10 to avoid re-retaining old content
         const relevantMessages = messages
           .filter((msg: any) => {
             if (typeof msg === 'string') return true;
             const role = msg?.role;
             return role === 'user' || role === 'assistant';
-          })
-          .slice(-10);
+          });
+
+        // Identify the current turn.
+        // We look for the second-to-last assistant message to find the break between turns.
+        // The current turn consists of: [User messages...] [Assistant response]
+        const assistantIndices = relevantMessages
+          .map((msg: any, index: number) => (typeof msg !== 'string' && msg?.role === 'assistant' ? index : -1))
+          .filter((idx: number) => idx !== -1);
+
+        let startIndex = 0;
+        if (assistantIndices.length >= 2) {
+          // Take the second to last assistant message index
+          const prevAssistantIndex = assistantIndices[assistantIndices.length - 2];
+          // We want to start AFTER the previous assistant message
+          startIndex = prevAssistantIndex + 1;
+        } else {
+          // If 0 or 1 assistant messages, retain everything (first turn)
+          startIndex = 0;
+        }
+
+        let messagesToRetain = relevantMessages.slice(startIndex);
+
+        // Safety cap: don't retain too many messages even in a turn
+        if (messagesToRetain.length > 20) {
+          messagesToRetain = messagesToRetain.slice(-20);
+        }
 
         // Format messages into a transcript
-        const transcript = relevantMessages
+        const transcript = messagesToRetain
           .map((msg: any) => {
             let role = 'unknown';
             let content = '';

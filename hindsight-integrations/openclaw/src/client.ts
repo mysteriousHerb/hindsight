@@ -9,12 +9,15 @@ import type {
   RetainResponse,
   RecallRequest,
   RecallResponse,
+  ReflectRequest,
+  ReflectResponse,
 } from './types.js';
 
 const execFileAsync = promisify(execFile);
 
 const MAX_BUFFER = 5 * 1024 * 1024; // 5 MB — large transcripts can exceed default 1 MB
 const DEFAULT_TIMEOUT_MS = 15_000;
+const DEFAULT_REFLECT_TIMEOUT_MS = 60_000;
 
 /** Strip null bytes from strings — Node 22 rejects them in execFile() args */
 const sanitize = (s: string) => s.replace(/\0/g, '');
@@ -216,13 +219,15 @@ export class HindsightClient {
     const url = `${this.apiUrl}/v1/default/banks/${encodeURIComponent(this.bankId)}/memories/recall`;
     // Defense-in-depth: truncate query to stay under API's 500-token limit
     const MAX_QUERY_CHARS = 800;
-    const query = request.query.length > MAX_QUERY_CHARS
-      ? (console.warn(`[Hindsight] Truncating recall query from ${request.query.length} to ${MAX_QUERY_CHARS} chars`),
-         request.query.substring(0, MAX_QUERY_CHARS))
-      : request.query;
+    let query = request.query;
+    if (query.length > MAX_QUERY_CHARS) {
+      console.warn(`[Hindsight] Truncating recall query from ${query.length} to ${MAX_QUERY_CHARS} chars`);
+      query = query.substring(0, MAX_QUERY_CHARS);
+    }
     const body = {
       query,
-      max_tokens: request.max_tokens || 1024,
+      max_tokens: request.max_tokens,
+      budget: request.budget,
     };
 
     const res = await fetch(url, {
@@ -242,9 +247,16 @@ export class HindsightClient {
 
   private async recallSubprocess(request: RecallRequest, timeoutMs?: number): Promise<RecallResponse> {
     const query = sanitize(request.query);
-    const maxTokens = request.max_tokens || 1024;
     const [cmd, ...baseArgs] = this.getEmbedCommand();
-    const args = [...baseArgs, '--profile', 'openclaw', 'memory', 'recall', this.bankId, query, '--output', 'json', '--max-tokens', String(maxTokens)];
+    const args = [...baseArgs, '--profile', 'openclaw', 'memory', 'recall', this.bankId, query, '--output', 'json'];
+
+    if (request.max_tokens) {
+      args.push('--max-tokens', String(request.max_tokens));
+    }
+
+    if (request.budget) {
+      args.push('--budget', request.budget);
+    }
 
     try {
       const { stdout } = await execFileAsync(cmd, args, {
@@ -255,6 +267,75 @@ export class HindsightClient {
       return JSON.parse(stdout) as RecallResponse;
     } catch (error) {
       throw new Error(`Failed to recall memories: ${error}`, { cause: error });
+    }
+  }
+
+  // --- reflect ---
+
+  async reflect(request: ReflectRequest, timeoutMs?: number): Promise<ReflectResponse> {
+    if (this.httpMode) {
+      return this.reflectHttp(request, timeoutMs);
+    }
+    return this.reflectSubprocess(request, timeoutMs);
+  }
+
+  private async reflectHttp(request: ReflectRequest, timeoutMs?: number): Promise<ReflectResponse> {
+    const url = `${this.apiUrl}/v1/default/banks/${encodeURIComponent(this.bankId)}/reflect`;
+
+    // Defense-in-depth: truncate query to stay under API's 500-token limit
+    const MAX_QUERY_CHARS = 800;
+    let query = request.query;
+    if (query.length > MAX_QUERY_CHARS) {
+      console.warn(`[Hindsight] Truncating reflect query from ${query.length} to ${MAX_QUERY_CHARS} chars`);
+      query = query.substring(0, MAX_QUERY_CHARS);
+    }
+
+    const body = {
+      query,
+      budget: request.budget,
+      context: request.context,
+      max_tokens: request.max_tokens,
+    };
+
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: this.httpHeaders(),
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(timeoutMs ?? DEFAULT_REFLECT_TIMEOUT_MS),
+    });
+
+    if (!res.ok) {
+      const text = await res.text().catch(() => '');
+      throw new Error(`Failed to reflect (HTTP ${res.status}): ${text}`);
+    }
+
+    return res.json() as Promise<ReflectResponse>;
+  }
+
+  private async reflectSubprocess(request: ReflectRequest, timeoutMs?: number): Promise<ReflectResponse> {
+    const query = sanitize(request.query);
+    const [cmd, ...baseArgs] = this.getEmbedCommand();
+    const args = [...baseArgs, '--profile', 'openclaw', 'memory', 'reflect', this.bankId, query, '--output', 'json'];
+
+    if (request.budget) {
+      args.push('--budget', request.budget);
+    }
+    if (request.context) {
+      args.push('--context', sanitize(request.context));
+    }
+    if (request.max_tokens) {
+      args.push('--max-tokens', String(request.max_tokens));
+    }
+
+    try {
+      const { stdout } = await execFileAsync(cmd, args, {
+        maxBuffer: MAX_BUFFER,
+        timeout: timeoutMs ?? DEFAULT_REFLECT_TIMEOUT_MS,
+      });
+
+      return JSON.parse(stdout) as ReflectResponse;
+    } catch (error) {
+      throw new Error(`Failed to reflect: ${error}`, { cause: error });
     }
   }
 }
