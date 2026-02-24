@@ -9,6 +9,8 @@ import type {
   RetainResponse,
   RecallRequest,
   RecallResponse,
+  ReflectRequest,
+  ReflectResponse,
 } from './types.js';
 
 const execFileAsync = promisify(execFile);
@@ -223,6 +225,7 @@ export class HindsightClient {
     const body = {
       query,
       max_tokens: request.max_tokens || 1024,
+      budget: request.budget,
     };
 
     const res = await fetch(url, {
@@ -246,6 +249,10 @@ export class HindsightClient {
     const [cmd, ...baseArgs] = this.getEmbedCommand();
     const args = [...baseArgs, '--profile', 'openclaw', 'memory', 'recall', this.bankId, query, '--output', 'json', '--max-tokens', String(maxTokens)];
 
+    if (request.budget) {
+      args.push('--budget', request.budget);
+    }
+
     try {
       const { stdout } = await execFileAsync(cmd, args, {
         maxBuffer: MAX_BUFFER,
@@ -255,6 +262,74 @@ export class HindsightClient {
       return JSON.parse(stdout) as RecallResponse;
     } catch (error) {
       throw new Error(`Failed to recall memories: ${error}`, { cause: error });
+    }
+  }
+
+  // --- reflect ---
+
+  async reflect(request: ReflectRequest, timeoutMs?: number): Promise<ReflectResponse> {
+    if (this.httpMode) {
+      return this.reflectHttp(request, timeoutMs);
+    }
+    return this.reflectSubprocess(request, timeoutMs);
+  }
+
+  private async reflectHttp(request: ReflectRequest, timeoutMs?: number): Promise<ReflectResponse> {
+    const url = `${this.apiUrl}/v1/default/banks/${encodeURIComponent(this.bankId)}/memories/reflect`;
+
+    // Defense-in-depth: truncate query to stay under API's 500-token limit
+    const MAX_QUERY_CHARS = 800;
+    const query = request.query.length > MAX_QUERY_CHARS
+      ? (console.warn(`[Hindsight] Truncating reflect query from ${request.query.length} to ${MAX_QUERY_CHARS} chars`),
+         request.query.substring(0, MAX_QUERY_CHARS))
+      : request.query;
+
+    const body = {
+      query,
+      budget: request.budget || 'mid',
+      context: request.context,
+      max_tokens: request.max_tokens,
+    };
+
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: this.httpHeaders(),
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(timeoutMs ?? 60_000), // Reflect might take longer
+    });
+
+    if (!res.ok) {
+      const text = await res.text().catch(() => '');
+      throw new Error(`Failed to reflect (HTTP ${res.status}): ${text}`);
+    }
+
+    return res.json() as Promise<ReflectResponse>;
+  }
+
+  private async reflectSubprocess(request: ReflectRequest, timeoutMs?: number): Promise<ReflectResponse> {
+    const query = sanitize(request.query);
+    const [cmd, ...baseArgs] = this.getEmbedCommand();
+    const args = [...baseArgs, '--profile', 'openclaw', 'memory', 'reflect', this.bankId, query, '--output', 'json'];
+
+    if (request.budget) {
+      args.push('--budget', request.budget);
+    }
+    if (request.context) {
+      args.push('--context', sanitize(request.context));
+    }
+    if (request.max_tokens) {
+      args.push('--max-tokens', String(request.max_tokens));
+    }
+
+    try {
+      const { stdout } = await execFileAsync(cmd, args, {
+        maxBuffer: MAX_BUFFER,
+        timeout: timeoutMs ?? 60_000, // Reflect involves LLM generation, might take longer
+      });
+
+      return JSON.parse(stdout) as ReflectResponse;
+    } catch (error) {
+      throw new Error(`Failed to reflect: ${error}`, { cause: error });
     }
   }
 }

@@ -372,4 +372,150 @@ describe('agent_end robustness', () => {
     expect(retainArgs.content).toContain('Object message');
     expect(retainArgs.content).toContain('Text property message');
   });
+
+  it('retains only messages starting from the last user message (duplication fix)', async () => {
+    const api = {
+      config: {
+        plugins: {
+          entries: {
+            'hindsight-openclaw': {
+              config: {
+                llmProvider: 'openai-codex'
+              }
+            }
+          }
+        }
+      },
+      registerService: vi.fn(),
+      on: vi.fn(),
+    } as any;
+
+    plugin(api);
+    const agentEndHook = api.on.mock.calls.find(call => call[0] === 'agent_end')?.[1];
+
+    const mockClient = {
+      retain: vi.fn().mockResolvedValue({}),
+      setBankId: vi.fn(),
+    };
+    (global as any).__hindsightClient = {
+      waitForReady: vi.fn().mockResolvedValue(undefined),
+      getClientForContext: vi.fn().mockResolvedValue(mockClient),
+    };
+
+    // Test case: Conversation history [User1, Asst1, User2, Asst2]
+    // Should retain [User2, Asst2] only.
+    const event = {
+      success: true,
+      messages: [
+        { role: 'user', content: 'Turn 1 User' },
+        { role: 'assistant', content: 'Turn 1 Asst' },
+        { role: 'user', content: 'Turn 2 User' },
+        { role: 'assistant', content: 'Turn 2 Asst' }
+      ]
+    };
+
+    await agentEndHook(event, { agentId: 'agent1' });
+
+    expect(mockClient.retain).toHaveBeenCalled();
+    const retainArgs = mockClient.retain.mock.calls[0][0];
+    const content = retainArgs.content;
+
+    // Should contain Turn 2
+    expect(content).toContain('Turn 2 User');
+    expect(content).toContain('Turn 2 Asst');
+
+    // Should NOT contain Turn 1
+    expect(content).not.toContain('Turn 1 User');
+    expect(content).not.toContain('Turn 1 Asst');
+  });
+});
+
+describe('autoReflect', () => {
+  it('calls reflect when useReflect is true', async () => {
+    const api = {
+      config: {
+        plugins: {
+          entries: {
+            'hindsight-openclaw': {
+              config: {
+                llmProvider: 'openai-codex',
+                useReflect: true,
+                recallBudget: 'high'
+              }
+            }
+          }
+        }
+      },
+      registerService: vi.fn(),
+      on: vi.fn(),
+    } as any;
+
+    plugin(api);
+    const beforeAgentStartHook = api.on.mock.calls.find(call => call[0] === 'before_agent_start')?.[1];
+
+    const mockClient = {
+      recall: vi.fn().mockResolvedValue({ results: [] }),
+      reflect: vi.fn().mockResolvedValue({ text: 'Reflected context', based_on: { memories: [] } }),
+      setBankId: vi.fn(),
+    };
+    (global as any).__hindsightClient = {
+      waitForReady: vi.fn().mockResolvedValue(undefined),
+      getClientForContext: vi.fn().mockResolvedValue(mockClient),
+    };
+
+    const event = { rawMessage: 'What do I like?', prompt: 'What do I like?' };
+    const result = await beforeAgentStartHook(event, { agentId: 'agent1' });
+
+    expect(mockClient.reflect).toHaveBeenCalled();
+    const reflectArgs = mockClient.reflect.mock.calls[0][0];
+    expect(reflectArgs.query).toBe('What do I like?');
+    expect(reflectArgs.budget).toBe('high');
+    expect(reflectArgs.max_tokens).toBe(1024);
+
+    expect(mockClient.recall).not.toHaveBeenCalled();
+
+    expect(result.prependContext).toContain('Reflected context');
+  });
+
+  it('calls recall when useReflect is false (default)', async () => {
+    const api = {
+      config: {
+        plugins: {
+          entries: {
+            'hindsight-openclaw': {
+              config: {
+                llmProvider: 'openai-codex',
+                useReflect: false
+              }
+            }
+          }
+        }
+      },
+      registerService: vi.fn(),
+      on: vi.fn(),
+    } as any;
+
+    plugin(api);
+    const beforeAgentStartHook = api.on.mock.calls.find(call => call[0] === 'before_agent_start')?.[1];
+
+    const mockClient = {
+      recall: vi.fn().mockResolvedValue({ results: [{ text: 'Memory 1', mentioned_at: '2023-01-01' }] }),
+      reflect: vi.fn(),
+      setBankId: vi.fn(),
+    };
+    (global as any).__hindsightClient = {
+      waitForReady: vi.fn().mockResolvedValue(undefined),
+      getClientForContext: vi.fn().mockResolvedValue(mockClient),
+    };
+
+    const event = { rawMessage: 'What do I like?', prompt: 'What do I like?' };
+    const result = await beforeAgentStartHook(event, { agentId: 'agent1' });
+
+    expect(mockClient.recall).toHaveBeenCalled();
+    const recallArgs = mockClient.recall.mock.calls[0][0];
+    expect(recallArgs.max_tokens).toBe(1024); // Verify reduced max_tokens
+
+    expect(mockClient.reflect).not.toHaveBeenCalled();
+    expect(result.prependContext).toContain('Memory 1');
+  });
 });
