@@ -54,7 +54,7 @@ async function lazyReinit(): Promise<void> {
 
   console.log('[Hindsight] Attempting lazy re-initialization...');
   try {
-    await checkExternalApiHealth(externalApi.apiUrl);
+    await checkExternalApiHealth(externalApi.apiUrl || "");
 
     // Health check passed — set up env vars and create client
     process.env.HINDSIGHT_EMBED_API_URL = externalApi.apiUrl;
@@ -395,8 +395,8 @@ function buildClientOptions(
   externalApi: { apiUrl: string | null; apiToken: string | null },
 ): HindsightClientOptions {
   return {
-    llmProvider: llmConfig.provider,
-    llmApiKey: llmConfig.apiKey,
+    llmProvider: llmConfig.provider || "",
+    llmApiKey: llmConfig.apiKey || "",
     llmModel: llmConfig.model,
     embedVersion: pluginCfg.embedVersion,
     embedPackagePath: pluginCfg.embedPackagePath,
@@ -523,7 +523,7 @@ export default function (api: MoltbotPluginAPI) {
         if (usingExternalApi && externalApi.apiUrl) {
           // External API mode - check health, skip daemon startup
           console.log('[Hindsight] External API mode - skipping local daemon...');
-          await checkExternalApiHealth(externalApi.apiUrl);
+          await checkExternalApiHealth(externalApi.apiUrl || "");
 
           // Initialize client with direct HTTP mode
           console.log('[Hindsight] Creating HindsightClient (HTTP mode)...');
@@ -548,8 +548,8 @@ export default function (api: MoltbotPluginAPI) {
           console.log('[Hindsight] Creating HindsightEmbedManager...');
           embedManager = new HindsightEmbedManager(
             apiPort,
-            llmConfig.provider,
-            llmConfig.apiKey,
+            llmConfig.provider || "",
+            llmConfig.apiKey || "",
             llmConfig.model,
             llmConfig.baseUrl,
             pluginConfig.daemonIdleTimeout,
@@ -611,7 +611,7 @@ export default function (api: MoltbotPluginAPI) {
           const externalApi = detectExternalApi(pluginConfig);
           if (externalApi.apiUrl && isInitialized) {
             try {
-              await checkExternalApiHealth(externalApi.apiUrl);
+              await checkExternalApiHealth(externalApi.apiUrl || "");
               console.log('[Hindsight] External API is healthy');
               return;
             } catch (error) {
@@ -655,7 +655,7 @@ export default function (api: MoltbotPluginAPI) {
               process.env.HINDSIGHT_EMBED_API_TOKEN = externalApi.apiToken;
             }
 
-            await checkExternalApiHealth(externalApi.apiUrl);
+            await checkExternalApiHealth(externalApi.apiUrl || "");
 
             client = new HindsightClient(buildClientOptions(llmConfig, reinitPluginConfig, externalApi));
             const defaultBankId = deriveBankId(undefined, reinitPluginConfig);
@@ -671,8 +671,8 @@ export default function (api: MoltbotPluginAPI) {
             // Local daemon mode
             embedManager = new HindsightEmbedManager(
               apiPort,
-              llmConfig.provider,
-              llmConfig.apiKey,
+              llmConfig.provider || "",
+              llmConfig.apiKey || "",
               llmConfig.model,
               llmConfig.baseUrl,
               reinitPluginConfig.daemonIdleTimeout,
@@ -914,7 +914,13 @@ export function prepareRetentionTranscript(
   pluginConfig: PluginConfig
 ): { transcript: string; messageCount: number } | null {
   // Turn boundary detection: find the last user message
-  const lastUserIdx = messages.findLastIndex((m: any) => m.role === 'user');
+  let lastUserIdx = -1;
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (messages[i].role === 'user') {
+      lastUserIdx = i;
+      break;
+    }
+  }
   if (lastUserIdx === -1) {
     return null; // No user message found in turn
   }
