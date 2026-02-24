@@ -54,7 +54,7 @@ async function lazyReinit(): Promise<void> {
 
   console.log('[Hindsight] Attempting lazy re-initialization...');
   try {
-    await checkExternalApiHealth(externalApi.apiUrl || "");
+    await checkExternalApiHealth(externalApi.apiUrl, externalApi.apiToken);
 
     // Health check passed — set up env vars and create client
     process.env.HINDSIGHT_EMBED_API_URL = externalApi.apiUrl;
@@ -205,7 +205,7 @@ export function extractRecallQuery(
  * Falls back to default bank when context is unavailable.
  */
 export function deriveBankId(ctx: PluginHookAgentContext | undefined, pluginConfig: PluginConfig): string {
-  if (!pluginConfig.dynamicBankId) {
+  if (pluginConfig.dynamicBankId === false) {
     return pluginConfig.bankIdPrefix ? `${pluginConfig.bankIdPrefix}-openclaw` : 'openclaw';
   }
 
@@ -220,7 +220,7 @@ export function deriveBankId(ctx: PluginHookAgentContext | undefined, pluginConf
 
   const baseBankId = fields
     .map(f => fieldMap[f] || 'unknown')
-    .join('-');
+    .join('::');
 
   return pluginConfig.bankIdPrefix
     ? `${pluginConfig.bankIdPrefix}-${baseBankId}`
@@ -340,7 +340,8 @@ function detectLLMConfig(pluginConfig?: PluginConfig): {
   // No configuration found - show helpful error
 
   // Allow empty LLM config if using external Hindsight API (server handles LLM)
-  if (pluginConfig?.hindsightApiUrl) {
+  const externalApiCheck = detectExternalApi(pluginConfig);
+  if (externalApiCheck.apiUrl) {
     return {
       provider: undefined,
       apiKey: undefined,
@@ -407,7 +408,7 @@ function buildClientOptions(
  * Health check for external Hindsight API.
  * Retries up to 3 times with 2s delay — container DNS may not be ready on first boot.
  */
-async function checkExternalApiHealth(apiUrl: string): Promise<void> {
+async function checkExternalApiHealth(apiUrl: string, apiToken?: string | null): Promise<void> {
   const healthUrl = `${apiUrl.replace(/\/$/, '')}/health`;
   const maxRetries = 3;
   const retryDelay = 2000;
@@ -415,7 +416,11 @@ async function checkExternalApiHealth(apiUrl: string): Promise<void> {
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     try {
       console.log(`[Hindsight] Checking external API health at ${healthUrl}... (attempt ${attempt}/${maxRetries})`);
-      const response = await fetch(healthUrl, { signal: AbortSignal.timeout(10000) });
+      const headers: Record<string, string> = {};
+      if (apiToken) {
+        headers['Authorization'] = `Bearer ${apiToken}`;
+      }
+      const response = await fetch(healthUrl, { headers, signal: AbortSignal.timeout(10000) });
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}: ${response.statusText}`);
       }
@@ -524,7 +529,7 @@ export default function (api: MoltbotPluginAPI) {
         if (usingExternalApi && externalApi.apiUrl) {
           // External API mode - check health, skip daemon startup
           console.log('[Hindsight] External API mode - skipping local daemon...');
-          await checkExternalApiHealth(externalApi.apiUrl || "");
+          await checkExternalApiHealth(externalApi.apiUrl, externalApi.apiToken);
 
           // Initialize client with direct HTTP mode
           console.log('[Hindsight] Creating HindsightClient (HTTP mode)...');
@@ -612,7 +617,7 @@ export default function (api: MoltbotPluginAPI) {
           const externalApi = detectExternalApi(pluginConfig);
           if (externalApi.apiUrl && isInitialized) {
             try {
-              await checkExternalApiHealth(externalApi.apiUrl || "");
+              await checkExternalApiHealth(externalApi.apiUrl, externalApi.apiToken);
               console.log('[Hindsight] External API is healthy');
               return;
             } catch (error) {
@@ -656,7 +661,7 @@ export default function (api: MoltbotPluginAPI) {
               process.env.HINDSIGHT_EMBED_API_TOKEN = externalApi.apiToken;
             }
 
-            await checkExternalApiHealth(externalApi.apiUrl || "");
+            await checkExternalApiHealth(externalApi.apiUrl, externalApi.apiToken);
 
             client = new HindsightClient(buildClientOptions(llmConfig, reinitPluginConfig, externalApi));
             const defaultBankId = deriveBankId(undefined, reinitPluginConfig);
@@ -963,8 +968,9 @@ export function prepareRetentionTranscript(
       // Strip plugin-injected memory tags to prevent feedback loop
       content = stripMemoryTags(content);
 
-      return `[role: ${role}]\n${content}\n[${role}:end]`;
+      return content.trim() ? `[role: ${role}]\n${content}\n[${role}:end]` : null;
     })
+    .filter(Boolean)
     .join('\n\n');
 
   if (!transcript.trim() || transcript.length < 10) {

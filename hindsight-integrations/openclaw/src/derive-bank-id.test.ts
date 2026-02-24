@@ -16,13 +16,19 @@ describe('deriveBankId', () => {
 
   it('should use default isolation fields when not specified', () => {
     const bankId = deriveBankId(ctx, baseConfig);
-    expect(bankId).toBe('agent-123-channel-456-user-789');
+    expect(bankId).toBe('agent-123::channel-456::user-789');
+  });
+
+  it('should default to dynamic bank ID when dynamicBankId is not specified', () => {
+    const config: PluginConfig = {};
+    const bankId = deriveBankId(ctx, config);
+    expect(bankId).toBe('agent-123::channel-456::user-789');
   });
 
   it('should support ["agent", "user"] isolation', () => {
     const config: PluginConfig = { ...baseConfig, isolationFields: ['agent', 'user'] };
     const bankId = deriveBankId(ctx, config);
-    expect(bankId).toBe('agent-123-user-789');
+    expect(bankId).toBe('agent-123::user-789');
   });
 
   it('should support ["user"] isolation', () => {
@@ -52,13 +58,13 @@ describe('deriveBankId', () => {
   it('should support mixed fields including provider', () => {
     const config: PluginConfig = { ...baseConfig, isolationFields: ['provider', 'user'] };
     const bankId = deriveBankId(ctx, config);
-    expect(bankId).toBe('slack-user-789');
+    expect(bankId).toBe('slack::user-789');
   });
 
   it('should prepend bankIdPrefix if set', () => {
     const config: PluginConfig = { ...baseConfig, bankIdPrefix: 'prod' };
     const bankId = deriveBankId(ctx, config);
-    expect(bankId).toBe('prod-agent-123-channel-456-user-789');
+    expect(bankId).toBe('prod-agent-123::channel-456::user-789');
   });
 
   it('should use fallback values for missing context fields', () => {
@@ -66,7 +72,7 @@ describe('deriveBankId', () => {
       agentId: 'agent-123',
     };
     const bankId = deriveBankId(partialCtx, baseConfig);
-    expect(bankId).toBe('agent-123-unknown-anonymous');
+    expect(bankId).toBe('agent-123::unknown::anonymous');
   });
 
   it('should return "openclaw" if dynamicBankId is false', () => {
