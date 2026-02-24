@@ -24,6 +24,12 @@ openclaw gateway
 
 That's it! The plugin will automatically start capturing and recalling memories.
 
+## Features
+
+- **Auto-capture** and **auto-recall** of memories each turn
+- **Memory isolation** — configurable per agent, channel, user, or provider via `isolationFields`
+- **Retention controls** — choose which message roles to retain and toggle auto-retain on/off
+
 ## Documentation
 
 For full documentation, configuration options, troubleshooting, and development guide, see:
