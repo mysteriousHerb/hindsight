@@ -12,11 +12,10 @@ describe('HindsightClient remote mode without LLM config', () => {
     expect(client).toBeInstanceOf(HindsightClient);
   });
 
-  it('should allow initialization with partial LLM config', () => {
+  it('should allow initialization with partial config', () => {
     const client = new HindsightClient({
       apiUrl: 'https://api.example.com',
-      llmProvider: 'openai',
-      // llmApiKey missing
+      llmModel: 'gpt-4o-mini',
     });
     expect(client).toBeDefined();
   });

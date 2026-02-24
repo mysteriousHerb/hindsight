@@ -215,4 +215,28 @@ describe('prepareRetentionTranscript', () => {
     const result = prepareRetentionTranscript(messages, baseConfig);
     expect(result?.transcript).toContain('Hello array');
   });
+
+  it('strips memory tags from retained content (feedback loop prevention)', () => {
+    const messages = [
+      { role: 'user', content: 'What is dark mode?' },
+      { role: 'assistant', content: '<hindsight_memories>\nUser prefers dark mode\n</hindsight_memories>\nHere is how to enable dark mode.' }
+    ];
+    const result = prepareRetentionTranscript(messages, baseConfig);
+    expect(result).not.toBeNull();
+    expect(result?.transcript).not.toContain('<hindsight_memories>');
+    expect(result?.transcript).not.toContain('User prefers dark mode');
+    expect(result?.transcript).toContain('Here is how to enable dark mode.');
+  });
+
+  it('reports accurate messageCount excluding empty messages', () => {
+    const messages = [
+      { role: 'user', content: 'Real message' },
+      { role: 'assistant', content: '<hindsight_memories>\nonly tags\n</hindsight_memories>' },
+      { role: 'assistant', content: 'Actual response' }
+    ];
+    const result = prepareRetentionTranscript(messages, baseConfig);
+    expect(result).not.toBeNull();
+    // The middle message becomes empty after tag stripping, so messageCount should be 2
+    expect(result?.messageCount).toBe(2);
+  });
 });

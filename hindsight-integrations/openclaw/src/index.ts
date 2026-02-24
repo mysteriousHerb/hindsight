@@ -201,7 +201,7 @@ export function extractRecallQuery(
 
 /**
  * Derive a bank ID from the agent context.
- * Uses configurable isolationFields to determine bank segmentation.
+ * Uses configurable dynamicBankGranularity to determine bank segmentation.
  * Falls back to default bank when context is unavailable.
  */
 export function deriveBankId(ctx: PluginHookAgentContext | undefined, pluginConfig: PluginConfig): string {
@@ -209,7 +209,20 @@ export function deriveBankId(ctx: PluginHookAgentContext | undefined, pluginConf
     return pluginConfig.bankIdPrefix ? `${pluginConfig.bankIdPrefix}-openclaw` : 'openclaw';
   }
 
-  const fields = pluginConfig.isolationFields?.length ? pluginConfig.isolationFields : ['agent', 'channel', 'user'];
+  const fields = pluginConfig.dynamicBankGranularity?.length ? pluginConfig.dynamicBankGranularity : ['agent', 'channel', 'user'];
+
+  // Validate field names at runtime — typos silently produce 'unknown' segments
+  const validFields = new Set(['agent', 'channel', 'user', 'provider']);
+  for (const f of fields) {
+    if (!validFields.has(f)) {
+      console.warn(`[Hindsight] Unknown dynamicBankGranularity field "${f}" — will resolve to "unknown" in bank ID. Valid fields: agent, channel, user, provider`);
+    }
+  }
+
+  // Warn when 'user' is in active fields but senderId is missing — bank ID will contain "anonymous"
+  if (fields.includes('user') && ctx && !ctx.senderId) {
+    console.warn('[Hindsight] senderId not available in context — bank ID will use "anonymous". Ensure your OpenClaw provider passes senderId.');
+  }
 
   const fieldMap: Record<string, string> = {
     agent: ctx?.agentId || 'default',
@@ -219,7 +232,7 @@ export function deriveBankId(ctx: PluginHookAgentContext | undefined, pluginConf
   };
 
   const baseBankId = fields
-    .map(f => fieldMap[f] || 'unknown')
+    .map(f => (fieldMap[f] || 'unknown').replace(/::/g, '__'))
     .join('::');
 
   return pluginConfig.bankIdPrefix
@@ -394,8 +407,6 @@ function buildClientOptions(
   externalApi: { apiUrl: string | null; apiToken: string | null },
 ): HindsightClientOptions {
   return {
-    llmProvider: llmConfig.provider || "",
-    llmApiKey: llmConfig.apiKey || "",
     llmModel: llmConfig.model,
     embedVersion: pluginCfg.embedVersion,
     embedPackagePath: pluginCfg.embedPackagePath,
@@ -459,9 +470,11 @@ function getPluginConfig(api: MoltbotPluginAPI): PluginConfig {
     bankIdPrefix: config.bankIdPrefix,
     excludeProviders: Array.isArray(config.excludeProviders) ? config.excludeProviders : [],
     autoRecall: config.autoRecall !== false, // Default: true (on) — backward compatible
-    isolationFields: Array.isArray(config.isolationFields) ? config.isolationFields : undefined,
+    dynamicBankGranularity: Array.isArray(config.dynamicBankGranularity) ? config.dynamicBankGranularity : undefined,
     autoRetain: config.autoRetain !== false, // Default: true
     retainRoles: Array.isArray(config.retainRoles) ? config.retainRoles : undefined,
+    recallBudget: config.recallBudget || 'mid',
+    recallMaxTokens: config.recallMaxTokens || 2048,
   };
 }
 
@@ -798,7 +811,7 @@ export default function (api: MoltbotPluginAPI) {
           console.log(`[Hindsight] Reusing in-flight recall for bank ${bankId}`);
           recallPromise = existing;
         } else {
-          recallPromise = client.recall({ query: prompt, max_tokens: 2048 }, RECALL_TIMEOUT_MS);
+          recallPromise = client.recall({ query: prompt, max_tokens: pluginConfig.recallMaxTokens || 2048, budget: pluginConfig.recallBudget }, RECALL_TIMEOUT_MS);
           inflightRecalls.set(recallKey, recallPromise);
           void recallPromise.catch(() => {}).finally(() => inflightRecalls.delete(recallKey));
         }
@@ -950,7 +963,7 @@ export function prepareRetentionTranscript(
   }
 
   // Format messages into a transcript
-  const transcript = filteredMessages
+  const transcriptParts = filteredMessages
     .map((msg: any) => {
       const role = msg.role || 'unknown';
       let content = '';
@@ -970,14 +983,15 @@ export function prepareRetentionTranscript(
 
       return content.trim() ? `[role: ${role}]\n${content}\n[${role}:end]` : null;
     })
-    .filter(Boolean)
-    .join('\n\n');
+    .filter(Boolean);
+
+  const transcript = transcriptParts.join('\n\n');
 
   if (!transcript.trim() || transcript.length < 10) {
     return null; // Transcript too short
   }
 
-  return { transcript, messageCount: filteredMessages.length };
+  return { transcript, messageCount: transcriptParts.length };
 }
 
 

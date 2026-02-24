@@ -26,37 +26,37 @@ describe('deriveBankId', () => {
   });
 
   it('should support ["agent", "user"] isolation', () => {
-    const config: PluginConfig = { ...baseConfig, isolationFields: ['agent', 'user'] };
+    const config: PluginConfig = { ...baseConfig, dynamicBankGranularity: ['agent', 'user'] };
     const bankId = deriveBankId(ctx, config);
     expect(bankId).toBe('agent-123::user-789');
   });
 
   it('should support ["user"] isolation', () => {
-    const config: PluginConfig = { ...baseConfig, isolationFields: ['user'] };
+    const config: PluginConfig = { ...baseConfig, dynamicBankGranularity: ['user'] };
     const bankId = deriveBankId(ctx, config);
     expect(bankId).toBe('user-789');
   });
 
   it('should support ["agent"] isolation', () => {
-    const config: PluginConfig = { ...baseConfig, isolationFields: ['agent'] };
+    const config: PluginConfig = { ...baseConfig, dynamicBankGranularity: ['agent'] };
     const bankId = deriveBankId(ctx, config);
     expect(bankId).toBe('agent-123');
   });
 
   it('should support ["channel"] isolation', () => {
-    const config: PluginConfig = { ...baseConfig, isolationFields: ['channel'] };
+    const config: PluginConfig = { ...baseConfig, dynamicBankGranularity: ['channel'] };
     const bankId = deriveBankId(ctx, config);
     expect(bankId).toBe('channel-456');
   });
 
   it('should support ["provider"] isolation', () => {
-    const config: PluginConfig = { ...baseConfig, isolationFields: ['provider'] };
+    const config: PluginConfig = { ...baseConfig, dynamicBankGranularity: ['provider'] };
     const bankId = deriveBankId(ctx, config);
     expect(bankId).toBe('slack');
   });
 
   it('should support mixed fields including provider', () => {
-    const config: PluginConfig = { ...baseConfig, isolationFields: ['provider', 'user'] };
+    const config: PluginConfig = { ...baseConfig, dynamicBankGranularity: ['provider', 'user'] };
     const bankId = deriveBankId(ctx, config);
     expect(bankId).toBe('slack::user-789');
   });
@@ -79,5 +79,25 @@ describe('deriveBankId', () => {
     const config: PluginConfig = { dynamicBankId: false };
     const bankId = deriveBankId(ctx, config);
     expect(bankId).toBe('openclaw');
+  });
+
+  it('should escape :: in field values to prevent collisions', () => {
+    const ctxWithSeparator: PluginHookAgentContext = {
+      agentId: 'a::b',
+      channelId: 'c',
+      senderId: 'user-1',
+    };
+    const ctxWithoutSeparator: PluginHookAgentContext = {
+      agentId: 'a',
+      channelId: 'b::c',
+      senderId: 'user-1',
+    };
+    const bankId1 = deriveBankId(ctxWithSeparator, baseConfig);
+    const bankId2 = deriveBankId(ctxWithoutSeparator, baseConfig);
+    // These must NOT collide
+    expect(bankId1).not.toBe(bankId2);
+    // :: in values should be replaced with __
+    expect(bankId1).toBe('a__b::c::user-1');
+    expect(bankId2).toBe('a::b__c::user-1');
   });
 });

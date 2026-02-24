@@ -53,9 +53,11 @@ export interface PluginConfig {
   bankIdPrefix?: string; // Prefix for bank IDs (e.g. 'prod' -> 'prod-slack-C123')
   excludeProviders?: string[]; // Message providers to exclude from recall/retain (e.g. ['telegram', 'discord'])
   autoRecall?: boolean; // Auto-recall memories on every prompt (default: true). Set to false when agent has its own recall tool.
-  isolationFields?: string[]; // Subset of ['agent', 'provider', 'channel', 'user']. Default: ['agent', 'channel', 'user']
+  dynamicBankGranularity?: Array<'agent' | 'provider' | 'channel' | 'user'>; // Fields for bank ID derivation. Default: ['agent', 'channel', 'user']
   autoRetain?: boolean; // Default: true
-  retainRoles?: string[]; // Roles to include in retained transcript. Default: ['user', 'assistant']
+  retainRoles?: Array<'user' | 'assistant' | 'system' | 'tool'>; // Roles to include in retained transcript. Default: ['user', 'assistant']
+  recallBudget?: 'low' | 'mid' | 'high'; // Recall effort. Default: 'mid'
+  recallMaxTokens?: number; // Max tokens for recall response. Default: 2048
 }
 
 export interface ServiceConfig {
@@ -81,6 +83,7 @@ export interface RetainResponse {
 export interface RecallRequest {
   query: string;
   max_tokens?: number;
+  budget?: 'low' | 'mid' | 'high';
 }
 
 export interface RecallResponse {

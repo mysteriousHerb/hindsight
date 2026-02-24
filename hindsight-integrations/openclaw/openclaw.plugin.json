@@ -17,7 +17,7 @@
       },
       "bankMission": {
         "type": "string",
-        "description": "Custom mission/context for the memory bank",
+        "description": "Agent identity/purpose stored on the memory bank. Helps the memory engine understand context for better fact extraction during retain. Set once per bank on first use — this is not a recall prompt.",
         "default": "You are an AI assistant helping users across multiple communication channels (Telegram, Slack, Discord, etc.). Remember user preferences, instructions, and important context from conversations to provide personalized assistance."
       },
       "embedVersion": {
@@ -84,7 +84,7 @@
         },
         "description": "Message providers to exclude from recall and retain (e.g. ['telegram', 'discord'])"
       },
-      "isolationFields": {
+      "dynamicBankGranularity": {
         "type": "array",
         "items": {
           "type": "string",
@@ -123,6 +123,17 @@
           "user",
           "assistant"
         ]
+      },
+      "recallBudget": {
+        "type": "string",
+        "description": "Recall effort level. Higher budgets use more retrieval strategies for better results but take longer.",
+        "enum": ["low", "mid", "high"],
+        "default": "mid"
+      },
+      "recallMaxTokens": {
+        "type": "number",
+        "description": "Maximum tokens for recall response. Controls how much memory context is injected per turn.",
+        "default": 2048
       }
     },
     "additionalProperties": false
@@ -188,8 +199,8 @@
       "label": "Excluded Providers",
       "placeholder": "e.g. telegram, discord"
     },
-    "isolationFields": {
-      "label": "Isolation Strategy",
+    "dynamicBankGranularity": {
+      "label": "Bank Granularity",
       "placeholder": "e.g. ['agent', 'channel', 'user']"
     },
     "autoRetain": {
@@ -199,6 +210,14 @@
     "retainRoles": {
       "label": "Retain Roles",
       "placeholder": "e.g. ['user', 'assistant']"
+    },
+    "recallBudget": {
+      "label": "Recall Budget",
+      "placeholder": "low, mid, or high"
+    },
+    "recallMaxTokens": {
+      "label": "Recall Max Tokens",
+      "placeholder": "2048 (default)"
     }
   }
 }
