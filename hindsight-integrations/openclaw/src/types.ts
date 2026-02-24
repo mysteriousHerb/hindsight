@@ -58,7 +58,6 @@ export interface PluginConfig {
   retainRoles?: Array<'user' | 'assistant' | 'system' | 'tool'>; // Roles to include in retained transcript. Default: ['user', 'assistant']
   recallBudget?: 'low' | 'mid' | 'high'; // Recall effort. Default: 'mid'
   recallMaxTokens?: number; // Max tokens for recall response. Default: 2048
-  recallRounds?: number; // Number of conversation turns to include in recall query. Default: 1
 }
 
 export interface ServiceConfig {

@@ -25,10 +25,6 @@ const RECALL_TIMEOUT_MS = 10_000;
 // Guard against double hook registration (host may call plugin factory more than once)
 let hooksRegistered = false;
 
-// Per-bank recent message history for multi-round recall queries
-const recentMessagesByBank = new Map<string, string[]>();
-const MAX_STORED_RECALL_ROUNDS = 10;
-
 // Cooldown + guard to prevent concurrent reinit attempts
 let lastReinitAttempt = 0;
 let isReinitInProgress = false;
@@ -511,7 +507,6 @@ function getPluginConfig(api: MoltbotPluginAPI): PluginConfig {
     retainRoles: Array.isArray(config.retainRoles) ? config.retainRoles : undefined,
     recallBudget: config.recallBudget || 'mid',
     recallMaxTokens: config.recallMaxTokens || 2048,
-    recallRounds: typeof config.recallRounds === 'number' ? Math.max(1, Math.min(config.recallRounds, MAX_STORED_RECALL_ROUNDS)) : 1,
   };
 }
 
@@ -821,16 +816,6 @@ export default function (api: MoltbotPluginAPI) {
         }
         let prompt = extracted;
 
-        // Multi-round recall: prepend recent messages from previous turns for richer context
-        const recallRounds = pluginConfig.recallRounds ?? 1;
-        if (recallRounds > 1) {
-          const history = recentMessagesByBank.get(bankId) || [];
-          const prevMessages = history.slice(-(recallRounds - 1));
-          if (prevMessages.length > 0) {
-            prompt = [...prevMessages, prompt].join('\n');
-          }
-        }
-
         // Truncate — Hindsight API recall has a 500 token limit; 800 chars stays safely under even with non-ASCII
         const MAX_RECALL_QUERY_CHARS = 800;
         if (prompt.length > MAX_RECALL_QUERY_CHARS) {
@@ -886,14 +871,6 @@ User message: ${prompt}
 </hindsight_memories>`;
 
         console.log(`[Hindsight] Auto-recall: Injecting ${response.results.length} memories from bank ${bankId}`);
-
-        // Save current message to per-bank history for future multi-round recall
-        if (recallRounds > 1) {
-          const history = recentMessagesByBank.get(bankId) || [];
-          history.push(extracted);
-          if (history.length > MAX_STORED_RECALL_ROUNDS) history.shift();
-          recentMessagesByBank.set(bankId, history);
-        }
 
         // Inject context before the user message
         return { prependContext: contextMessage };
