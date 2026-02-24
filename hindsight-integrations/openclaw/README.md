@@ -43,10 +43,10 @@ Optional settings in `~/.openclaw/openclaw.json` under `plugins.entries.hindsigh
 | `dynamicBankId` | `true` | Enable per-context memory banks |
 | `bankIdPrefix` | — | Prefix for bank IDs (e.g. `"prod"`) |
 | `isolationFields` | `["agent", "channel", "user"]` | Fields used to derive bank ID. Options: `agent`, `channel`, `user`, `provider` |
-| `excludeProviders` | `[]` | Message providers to skip for recall/retain |
+| `excludeProviders` | `[]` | Message providers to skip for recall/retain (e.g. `slack`, `telegram`, `discord`) |
 | `autoRecall` | `true` | Auto-inject memories before each turn. Set to `false` when the agent has its own recall tool. |
 | `autoRetain` | `true` | Auto-retain conversations after each turn |
-| `retainRoles` | `["user", "assistant"]` | Which message roles to retain |
+| `retainRoles` | `["user", "assistant"]` | Which message roles to retain. Options: `user`, `assistant`, `system`, `tool` |
 | `hindsightApiUrl` | — | External Hindsight API URL (skips local daemon) |
 | `hindsightApiToken` | — | Auth token for external API |
 
