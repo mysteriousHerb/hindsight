@@ -83,6 +83,19 @@ describe('extractRecallQuery', () => {
     expect(result).toBe('What programming language do I prefer?');
   });
 
+  it('returns null when rawMessage is absent and prompt is bare metadata', () => {
+    const metadataPrompt = 'Conversation info (untrusted metadata):\n```json\n{"message_id": "abc123"}\n```';
+    expect(extractRecallQuery(undefined, metadataPrompt)).toBeNull();
+  });
+
+  it('falls back to prompt when rawMessage is metadata but prompt has real content', () => {
+    const result = extractRecallQuery(
+      'Conversation info (untrusted metadata):',
+      'System: You are c0der.\n\nhow many cats do i have?',
+    );
+    expect(result).toBe('how many cats do i have?');
+  });
+
   it('strips leading System: lines from prompt', () => {
     const prompt = 'System: You are an agent.\nSystem: Use tools wisely.\n\nWhat is my name?';
     const result = extractRecallQuery(undefined, prompt);

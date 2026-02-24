@@ -175,6 +175,16 @@ export function extractRecallQuery(
 
   let recallQuery = rawMessage;
   if (!recallQuery || typeof recallQuery !== 'string' || recallQuery.trim().length < 5 || isMetadata(recallQuery)) {
+    // If rawMessage is absent/metadata, only fall back to prompt if prompt is NOT a bare metadata message.
+    // Bare metadata = starts with "Conversation info (untrusted metadata)" with no real user content after.
+    // We do NOT reject prompts that start with "System:" lines — those wrap real user queries.
+    const BARE_METADATA_PATTERNS = [
+      /^\s*conversation info\s*\(untrusted metadata\)/i,
+      /^\s*\(untrusted metadata\)/i,
+    ];
+    if (!rawMessage && prompt && BARE_METADATA_PATTERNS.some(p => p.test(prompt))) {
+      return null;
+    }
     recallQuery = prompt;
     if (!recallQuery || typeof recallQuery !== 'string' || recallQuery.length < 5) {
       return null;
