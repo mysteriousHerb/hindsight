@@ -526,10 +526,11 @@ describe('agent_end hook', () => {
     expect(retainSpy).toHaveBeenCalledOnce();
     const [req] = retainSpy.mock.calls[0];
 
-    // Each message should appear in the correct envelope format
-    expect(req.content).toContain('[role: user]\nMy name is Carol.\n[user:end]');
-    expect(req.content).toContain('[role: assistant]\nNice to meet you, Carol!\n[assistant:end]');
+    // Only the last turn (from last user message onwards) is retained
     expect(req.content).toContain('[role: user]\nI work as a data scientist.\n[user:end]');
-    expect(req.metadata?.message_count).toBe('4');
+    expect(req.content).toContain("[role: assistant]\nThat's a fascinating career!\n[assistant:end]");
+    // Earlier turns are excluded by turn boundary detection
+    expect(req.content).not.toContain('My name is Carol.');
+    expect(req.metadata?.message_count).toBe('2');
   });
 });
