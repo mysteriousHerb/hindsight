@@ -22,8 +22,9 @@ import type { RecallResponse } from './types.js';
 const inflightRecalls = new Map<string, Promise<RecallResponse>>();
 const RECALL_TIMEOUT_MS = 10_000;
 
-// Guard against double hook registration (host may call plugin factory more than once)
-let hooksRegistered = false;
+// Guard against double hook registration on the same api instance
+// Uses a WeakSet so each api instance can only register hooks once
+const registeredApis = new WeakSet<object>();
 
 // Cooldown + guard to prevent concurrent reinit attempts
 let lastReinitAttempt = 0;
@@ -771,11 +772,11 @@ export default function (api: MoltbotPluginAPI) {
     console.log('[Hindsight] Plugin loaded successfully');
 
     // Register agent hooks for auto-recall and auto-retention
-    if (hooksRegistered) {
-      console.log('[Hindsight] Hooks already registered, skipping duplicate registration');
+    if (registeredApis.has(api)) {
+      console.log('[Hindsight] Hooks already registered for this api instance, skipping duplicate registration');
       return;
     }
-    hooksRegistered = true;
+    registeredApis.add(api);
     console.log('[Hindsight] Registering agent hooks...');
 
     // Store session key and context for retention
