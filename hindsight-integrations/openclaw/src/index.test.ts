@@ -173,11 +173,6 @@ describe('prepareRetentionTranscript', () => {
     retainRoles: ['user', 'assistant'],
   };
 
-  it('returns null for null or undefined messages', () => {
-    expect(prepareRetentionTranscript(null as any, baseConfig)).toBeNull();
-    expect(prepareRetentionTranscript(undefined as any, baseConfig)).toBeNull();
-  });
-
   it('returns null if no user message found (turn boundary)', () => {
     const messages = [
       { role: 'assistant', content: 'Hello' },
@@ -220,14 +215,4 @@ describe('prepareRetentionTranscript', () => {
     const result = prepareRetentionTranscript(messages, baseConfig);
     expect(result?.transcript).toContain('Hello array');
   });
-
-  it('returns null for empty messages array', () => {
-    const messages: any[] = [];
-    const result = prepareRetentionTranscript(messages, baseConfig);
-    expect(result).toBeNull();
-  });
-
-  // Note: The transcript.length < 10 guard in prepareRetentionTranscript is effectively
-  // unreachable because the formatting ([role: X]\n...\n[X:end]) alone exceeds 10 chars.
-  // The !transcript.trim() guard is covered by the empty messages test above.
 });

@@ -53,9 +53,9 @@ export interface PluginConfig {
   bankIdPrefix?: string; // Prefix for bank IDs (e.g. 'prod' -> 'prod-slack-C123')
   excludeProviders?: string[]; // Message providers to exclude from recall/retain (e.g. ['telegram', 'discord'])
   autoRecall?: boolean; // Auto-recall memories on every prompt (default: true). Set to false when agent has its own recall tool.
-  isolationFields?: ('agent' | 'channel' | 'user' | 'provider')[]; // Subset of ['agent', 'channel', 'user', 'provider']. Default: ['agent', 'channel', 'user']
+  isolationFields?: string[]; // Subset of ['agent', 'provider', 'channel', 'user']. Default: ['agent', 'channel', 'user']
   autoRetain?: boolean; // Default: true
-  retainRoles?: ('user' | 'assistant' | 'system' | 'tool')[]; // Roles to include in retained transcript. Default: ['user', 'assistant']
+  retainRoles?: string[]; // Roles to include in retained transcript. Default: ['user', 'assistant']
 }
 
 export interface ServiceConfig {

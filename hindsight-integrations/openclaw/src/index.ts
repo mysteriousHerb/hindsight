@@ -342,7 +342,7 @@ function detectLLMConfig(pluginConfig?: PluginConfig): {
   // No configuration found - show helpful error
 
   // Allow empty LLM config if using external Hindsight API (server handles LLM)
-  if (pluginConfig?.hindsightApiUrl || process.env.HINDSIGHT_EMBED_API_URL) {
+  if (pluginConfig?.hindsightApiUrl) {
     return {
       provider: undefined,
       apiKey: undefined,
@@ -456,10 +456,6 @@ function getPluginConfig(api: MoltbotPluginAPI): PluginConfig {
     bankIdPrefix: config.bankIdPrefix,
     excludeProviders: Array.isArray(config.excludeProviders) ? config.excludeProviders : [],
     autoRecall: config.autoRecall !== false, // Default: true (on) — backward compatible
-    // Isolation and retention options
-    isolationFields: Array.isArray(config.isolationFields) ? config.isolationFields : undefined,
-    autoRetain: config.autoRetain !== false, // Default: true (on)
-    retainRoles: Array.isArray(config.retainRoles) ? config.retainRoles : undefined,
   };
 }
 
@@ -917,11 +913,6 @@ export function prepareRetentionTranscript(
   messages: any[],
   pluginConfig: PluginConfig
 ): { transcript: string; messageCount: number } | null {
-  // Guard against null/undefined messages
-  if (!messages) {
-    return null;
-  }
-
   // Turn boundary detection: find the last user message
   const lastUserIdx = messages.findLastIndex((m: any) => m.role === 'user');
   if (lastUserIdx === -1) {
