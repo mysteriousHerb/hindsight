@@ -811,10 +811,13 @@ export default function (api: MoltbotPluginAPI) {
 
         // Get the user's latest message for recall — only the raw user text, not the full prompt
         // rawMessage is clean user text; prompt includes envelope, system events, media notes, etc.
+        console.log(`[Hindsight] extractRecallQuery - rawMessage: ${JSON.stringify(event.rawMessage?.substring(0, 80))}, prompt: ${JSON.stringify(event.prompt?.substring(0, 80))}`);
         const extracted = extractRecallQuery(event.rawMessage, event.prompt);
         if (!extracted) {
+          console.log('[Hindsight] extractRecallQuery returned null, skipping recall');
           return;
         }
+        console.log(`[Hindsight] extractRecallQuery result: ${JSON.stringify(extracted.substring(0, 80))}`);
         let prompt = extracted;
 
         // Truncate — Hindsight API recall has a 500 token limit; 800 chars stays safely under even with non-ASCII
@@ -839,7 +842,7 @@ export default function (api: MoltbotPluginAPI) {
           return;
         }
 
-        console.log(`[Hindsight] Auto-recall for bank ${bankId}, prompt: ${prompt.substring(0, 50)}`);
+        console.log(`[Hindsight] Auto-recall for bank ${bankId}, query: ${JSON.stringify(prompt)}, max_tokens: ${pluginConfig.recallMaxTokens || 2048}, budget: ${pluginConfig.recallBudget}`);
 
         // Recall with deduplication: reuse in-flight request for same bank
         const recallKey = bankId;
@@ -860,6 +863,8 @@ export default function (api: MoltbotPluginAPI) {
           console.log('[Hindsight] No memories found for auto-recall');
           return;
         }
+
+        console.log(`[Hindsight] Auto-recall results (${response.results.length}): ${response.results.map(r => `[${r.type}] ${r.text?.substring(0, 60)}`).join(' | ')}`);
 
         // Format memories as JSON with all fields from recall
         const memoriesFormatted = formatMemories(response.results);
