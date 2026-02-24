@@ -204,6 +204,23 @@ export function extractRecallQuery(
  * Uses configurable dynamicBankGranularity to determine bank segmentation.
  * Falls back to default bank when context is unavailable.
  */
+/**
+ * Parse the OpenClaw sessionKey to extract context fields.
+ * Format: "agent:{agentId}:{provider}:{channelType}:{channelId}[:{extra}]"
+ * Example: "agent:c0der:telegram:group:-1003825475854:topic:42"
+ */
+function parseSessionKey(sessionKey: string): { agentId?: string; provider?: string; channel?: string } {
+  const parts = sessionKey.split(':');
+  if (parts.length < 5 || parts[0] !== 'agent') return {};
+  // parts[1] = agentId, parts[2] = provider, parts[3] = channelType, parts[4..] = channelId + extras
+  return {
+    agentId: parts[1],
+    provider: parts[2],
+    // Rejoin from channelType onward as the channel identifier (e.g. "group:-1003825475854:topic:42")
+    channel: parts.slice(3).join(':'),
+  };
+}
+
 export function deriveBankId(ctx: PluginHookAgentContext | undefined, pluginConfig: PluginConfig): string {
   if (pluginConfig.dynamicBankId === false) {
     return pluginConfig.bankIdPrefix ? `${pluginConfig.bankIdPrefix}-openclaw` : 'openclaw';
@@ -219,16 +236,19 @@ export function deriveBankId(ctx: PluginHookAgentContext | undefined, pluginConf
     }
   }
 
+  // Parse sessionKey as fallback when direct context fields are missing
+  const sessionParsed = ctx?.sessionKey ? parseSessionKey(ctx.sessionKey) : {};
+
   // Warn when 'user' is in active fields but senderId is missing — bank ID will contain "anonymous"
   if (fields.includes('user') && ctx && !ctx.senderId) {
     console.warn('[Hindsight] senderId not available in context — bank ID will use "anonymous". Ensure your OpenClaw provider passes senderId.');
   }
 
   const fieldMap: Record<string, string> = {
-    agent: ctx?.agentId || 'default',
-    channel: ctx?.channelId || 'unknown',
+    agent: ctx?.agentId || sessionParsed.agentId || 'default',
+    channel: ctx?.channelId || sessionParsed.channel || 'unknown',
     user: ctx?.senderId || 'anonymous',
-    provider: ctx?.messageProvider || 'unknown',
+    provider: ctx?.messageProvider || sessionParsed.provider || 'unknown',
   };
 
   const baseBankId = fields
@@ -749,9 +769,6 @@ export default function (api: MoltbotPluginAPI) {
     // Hook signature: (event, ctx) where event has {prompt, messages?} and ctx has agent context
     api.on('before_agent_start', async (event: any, ctx?: PluginHookAgentContext) => {
       try {
-        // Debug: log full context to identify available keys
-        console.log(`[Hindsight] before_agent_start ctx keys: ${ctx ? JSON.stringify(ctx, null, 0).substring(0, 500) : 'undefined'}`);
-
         // Capture session key and context for use in agent_end
         if (ctx?.sessionKey) {
           currentSessionKey = ctx.sessionKey;

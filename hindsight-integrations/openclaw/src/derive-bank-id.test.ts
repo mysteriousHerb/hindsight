@@ -75,6 +75,16 @@ describe('deriveBankId', () => {
     expect(bankId).toBe('agent-123::unknown::anonymous');
   });
 
+  it('should parse sessionKey as fallback for missing channel and provider', () => {
+    const ctxWithSession: PluginHookAgentContext = {
+      agentId: 'c0der',
+      sessionKey: 'agent:c0der:telegram:group:-1003825475854:topic:42',
+    };
+    const config: PluginConfig = { ...baseConfig, dynamicBankGranularity: ['agent', 'channel', 'provider'] };
+    const bankId = deriveBankId(ctxWithSession, config);
+    expect(bankId).toBe('c0der::group:-1003825475854:topic:42::telegram');
+  });
+
   it('should return "openclaw" if dynamicBankId is false', () => {
     const config: PluginConfig = { dynamicBankId: false };
     const bankId = deriveBankId(ctx, config);
