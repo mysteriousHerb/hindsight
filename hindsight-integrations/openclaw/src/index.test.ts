@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { stripMemoryTags, extractRecallQuery } from './index.js';
+import { stripMemoryTags, extractRecallQuery, formatMemories, prepareRetentionTranscript } from './index.js';
+import type { PluginConfig, MemoryResult } from './types.js';
 
 // ---------------------------------------------------------------------------
 // stripMemoryTags
@@ -139,5 +140,79 @@ describe('extractRecallQuery', () => {
   it('trims whitespace from result', () => {
     const result = extractRecallQuery('   What is my job?   ', undefined);
     expect(result).toBe('What is my job?');
+  });
+});
+
+
+// ---------------------------------------------------------------------------
+// formatMemories
+// ---------------------------------------------------------------------------
+
+describe('formatMemories', () => {
+  it('formats memories as a bulleted list', () => {
+    const memories: MemoryResult[] = [
+      { id: '1', text: 'User prefers dark mode', mentioned_at: '2023-01-01T12:00:00Z' } as any,
+      { id: '2', text: 'User is learning Rust', mentioned_at: null } as any,
+    ];
+    const output = formatMemories(memories);
+    expect(output).toBe('- User prefers dark mode (2023-01-01T12:00:00Z)\n- User is learning Rust');
+  });
+
+  it('returns empty string for empty memories', () => {
+    expect(formatMemories([])).toBe('');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// prepareRetentionTranscript
+// ---------------------------------------------------------------------------
+
+describe('prepareRetentionTranscript', () => {
+  const baseConfig: PluginConfig = {
+    dynamicBankId: true,
+    retainRoles: ['user', 'assistant'],
+  };
+
+  it('returns null if no user message found (turn boundary)', () => {
+    const messages = [
+      { role: 'assistant', content: 'Hello' },
+      { role: 'system', content: 'Context' }
+    ];
+    const result = prepareRetentionTranscript(messages, baseConfig);
+    expect(result).toBeNull();
+  });
+
+  it('retains from last user message onwards', () => {
+    const messages = [
+      { role: 'user', content: 'Old user' },
+      { role: 'assistant', content: 'Old assistant' },
+      { role: 'user', content: 'New user' },
+      { role: 'assistant', content: 'New assistant' }
+    ];
+    const result = prepareRetentionTranscript(messages, baseConfig);
+    expect(result).not.toBeNull();
+    expect(result?.transcript).toContain('New user');
+    expect(result?.transcript).toContain('New assistant');
+    expect(result?.transcript).not.toContain('Old user');
+  });
+
+  it('filters out excluded roles', () => {
+    const config: PluginConfig = { ...baseConfig, retainRoles: ['user'] };
+    const messages = [
+      { role: 'user', content: 'User msg' },
+      { role: 'assistant', content: 'Assistant msg' }
+    ];
+    const result = prepareRetentionTranscript(messages, config);
+    expect(result).not.toBeNull();
+    expect(result?.transcript).toContain('User msg');
+    expect(result?.transcript).not.toContain('Assistant msg');
+  });
+
+  it('handles array content', () => {
+    const messages = [
+      { role: 'user', content: [{ type: 'text', text: 'Hello array' }] }
+    ];
+    const result = prepareRetentionTranscript(messages, baseConfig);
+    expect(result?.transcript).toContain('Hello array');
   });
 });

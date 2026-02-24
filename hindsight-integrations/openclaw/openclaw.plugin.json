@@ -28,7 +28,15 @@
       "llmProvider": {
         "type": "string",
         "description": "LLM provider for Hindsight memory (e.g. 'openai', 'anthropic', 'gemini', 'groq', 'ollama', 'openai-codex', 'claude-code'). Takes priority over auto-detection but not over HINDSIGHT_API_LLM_PROVIDER env var.",
-        "enum": ["openai", "anthropic", "gemini", "groq", "ollama", "openai-codex", "claude-code"]
+        "enum": [
+          "openai",
+          "anthropic",
+          "gemini",
+          "groq",
+          "ollama",
+          "openai-codex",
+          "claude-code"
+        ]
       },
       "llmModel": {
         "type": "string",
@@ -71,8 +79,50 @@
       },
       "excludeProviders": {
         "type": "array",
-        "items": { "type": "string" },
+        "items": {
+          "type": "string"
+        },
         "description": "Message providers to exclude from recall and retain (e.g. ['telegram', 'discord'])"
+      },
+      "isolationFields": {
+        "type": "array",
+        "items": {
+          "type": "string",
+          "enum": [
+            "agent",
+            "channel",
+            "user",
+            "provider"
+          ]
+        },
+        "description": "Fields used to derive bank ID. Controls memory isolation granularity. Default: ['agent', 'channel', 'user'].",
+        "default": [
+          "agent",
+          "channel",
+          "user"
+        ]
+      },
+      "autoRetain": {
+        "type": "boolean",
+        "description": "Automatically retain conversation as memories after each interaction. Set to false to disable.",
+        "default": true
+      },
+      "retainRoles": {
+        "type": "array",
+        "items": {
+          "type": "string",
+          "enum": [
+            "user",
+            "assistant",
+            "system",
+            "tool"
+          ]
+        },
+        "description": "Message roles to include in retained transcript. Default: ['user', 'assistant'].",
+        "default": [
+          "user",
+          "assistant"
+        ]
       }
     },
     "additionalProperties": false
@@ -137,6 +187,18 @@
     "excludeProviders": {
       "label": "Excluded Providers",
       "placeholder": "e.g. telegram, discord"
+    },
+    "isolationFields": {
+      "label": "Isolation Strategy",
+      "placeholder": "e.g. ['agent', 'channel', 'user']"
+    },
+    "autoRetain": {
+      "label": "Auto-Retain",
+      "placeholder": "true (enable auto-retention)"
+    },
+    "retainRoles": {
+      "label": "Retain Roles",
+      "placeholder": "e.g. ['user', 'assistant']"
     }
   }
 }

@@ -29,8 +29,8 @@ function sanitizeFilename(name: string): string {
 }
 
 export interface HindsightClientOptions {
-  llmProvider: string;
-  llmApiKey: string;
+  llmProvider?: string;
+  llmApiKey?: string;
   llmModel?: string;
   embedVersion?: string;
   embedPackagePath?: string;
@@ -40,8 +40,8 @@ export interface HindsightClientOptions {
 
 export class HindsightClient {
   private bankId: string = 'default';
-  private llmProvider: string;
-  private llmApiKey: string;
+  private llmProvider?: string;
+  private llmApiKey?: string;
   private llmModel?: string;
   private embedVersion: string;
   private embedPackagePath?: string;
