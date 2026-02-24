@@ -749,6 +749,9 @@ export default function (api: MoltbotPluginAPI) {
     // Hook signature: (event, ctx) where event has {prompt, messages?} and ctx has agent context
     api.on('before_agent_start', async (event: any, ctx?: PluginHookAgentContext) => {
       try {
+        // Debug: log full context to identify available keys
+        console.log(`[Hindsight] before_agent_start ctx keys: ${ctx ? JSON.stringify(ctx, null, 0).substring(0, 500) : 'undefined'}`);
+
         // Capture session key and context for use in agent_end
         if (ctx?.sessionKey) {
           currentSessionKey = ctx.sessionKey;
