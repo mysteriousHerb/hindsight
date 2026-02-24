@@ -222,13 +222,7 @@ describe('prepareRetentionTranscript', () => {
     expect(result).toBeNull();
   });
 
-  it('returns null when transcript is too short (< 10 chars)', () => {
-    const messages = [
-      { role: 'user', content: 'X' } // Single char - will produce transcript like "[role: user]\nX\n[user:end]" which is > 10 chars
-    ];
-    const result = prepareRetentionTranscript(messages, baseConfig);
-    // The transcript includes formatting, so even "X" produces a string > 10 chars
-    // To actually trigger the < 10 check, we'd need empty content after stripMemoryTags
-    expect(result).not.toBeNull(); // This test case doesn't actually trigger the guard
-  });
+  // Note: The transcript.length < 10 guard in prepareRetentionTranscript is effectively
+  // unreachable because the formatting ([role: X]\n...\n[X:end]) alone exceeds 10 chars.
+  // The !transcript.trim() guard is covered by the empty messages test above.
 });
