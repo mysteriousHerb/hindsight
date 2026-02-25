@@ -49,6 +49,8 @@ Optional settings in `~/.openclaw/openclaw.json` under `plugins.entries.hindsigh
 | `retainRoles` | `["user", "assistant"]` | Which message roles to retain. Options: `user`, `assistant`, `system`, `tool` |
 | `recallBudget` | `"mid"` | Recall effort: `low`, `mid`, or `high`. Higher budgets use more retrieval strategies. |
 | `recallMaxTokens` | `2048` | Max tokens for recall response. Controls how much memory context is injected per turn. |
+| `recallTypes` | `["world", "experience"]` | Memory types to recall. Options: `world`, `experience`, `observation`. Excludes verbose `observation` entries by default. |
+| `recallTopK` | — | Max number of memories to inject per turn. Applied after API response as a hard cap. |
 | `hindsightApiUrl` | — | External Hindsight API URL (skips local daemon) |
 | `hindsightApiToken` | — | Auth token for external API |
 
