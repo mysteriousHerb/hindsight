@@ -58,6 +58,7 @@ export interface PluginConfig {
   retainRoles?: Array<'user' | 'assistant' | 'system' | 'tool'>; // Roles to include in retained transcript. Default: ['user', 'assistant']
   recallBudget?: 'low' | 'mid' | 'high'; // Recall effort. Default: 'mid'
   recallMaxTokens?: number; // Max tokens for recall response. Default: 2048
+  recallTypes?: Array<'world' | 'experience' | 'observation'>; // Memory types to recall. Default: ['world', 'experience']
 }
 
 export interface ServiceConfig {
@@ -84,6 +85,7 @@ export interface RecallRequest {
   query: string;
   max_tokens?: number;
   budget?: 'low' | 'mid' | 'high';
+  types?: Array<'world' | 'experience' | 'observation'>;
 }
 
 export interface RecallResponse {

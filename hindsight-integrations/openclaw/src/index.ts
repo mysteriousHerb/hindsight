@@ -518,6 +518,7 @@ function getPluginConfig(api: MoltbotPluginAPI): PluginConfig {
     retainRoles: Array.isArray(config.retainRoles) ? config.retainRoles : undefined,
     recallBudget: config.recallBudget || 'mid',
     recallMaxTokens: config.recallMaxTokens || 2048,
+    recallTypes: Array.isArray(config.recallTypes) ? config.recallTypes : ['world', 'experience'],
   };
 }
 
@@ -862,7 +863,7 @@ export default function (api: MoltbotPluginAPI) {
           console.log(`[Hindsight] Reusing in-flight recall for bank ${bankId}`);
           recallPromise = existing;
         } else {
-          recallPromise = client.recall({ query: prompt, max_tokens: pluginConfig.recallMaxTokens || 2048, budget: pluginConfig.recallBudget }, RECALL_TIMEOUT_MS);
+          recallPromise = client.recall({ query: prompt, max_tokens: pluginConfig.recallMaxTokens || 2048, budget: pluginConfig.recallBudget, types: pluginConfig.recallTypes }, RECALL_TIMEOUT_MS);
           inflightRecalls.set(recallKey, recallPromise);
           void recallPromise.catch(() => {}).finally(() => inflightRecalls.delete(recallKey));
         }
