@@ -134,6 +134,19 @@
         "type": "number",
         "description": "Maximum tokens for recall response. Controls how much memory context is injected per turn.",
         "default": 2048
+      },
+      "recallTypes": {
+        "type": "array",
+        "items": {
+          "type": "string",
+          "enum": ["world", "experience", "observation"]
+        },
+        "description": "Memory types to recall. Defaults to ['world', 'experience'] — excludes verbose observation entries.",
+        "default": ["world", "experience"]
+      },
+      "recallTopK": {
+        "type": "number",
+        "description": "Maximum number of memories to inject per turn. Applied after API response as a hard cap."
       }
     },
     "additionalProperties": false
@@ -218,6 +231,14 @@
     "recallMaxTokens": {
       "label": "Recall Max Tokens",
       "placeholder": "2048 (default)"
+    },
+    "recallTypes": {
+      "label": "Recall Types",
+      "placeholder": "e.g. ['world', 'experience']"
+    },
+    "recallTopK": {
+      "label": "Recall Top K",
+      "placeholder": "e.g. 5 (no limit by default)"
     }
   }
 }
