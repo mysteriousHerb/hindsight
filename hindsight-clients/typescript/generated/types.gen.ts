@@ -397,6 +397,18 @@ export type ChunkResponse = {
 };
 
 /**
+ * ClearMemoryObservationsResponse
+ *
+ * Response model for clearing observations for a specific memory.
+ */
+export type ClearMemoryObservationsResponse = {
+  /**
+   * Deleted Count
+   */
+  deleted_count: number;
+};
+
+/**
  * ConsolidationResponse
  *
  * Response model for consolidation trigger endpoint.
@@ -424,21 +436,86 @@ export type ConsolidationResponse = {
 export type CreateBankRequest = {
   /**
    * Name
+   *
+   * Deprecated: display label only, not advertised
    */
   name?: string | null;
+  /**
+   * Deprecated: use update_bank_config instead
+   */
   disposition?: DispositionTraits | null;
+  /**
+   * Disposition Skepticism
+   *
+   * Deprecated: use update_bank_config instead
+   */
+  disposition_skepticism?: number | null;
+  /**
+   * Disposition Literalism
+   *
+   * Deprecated: use update_bank_config instead
+   */
+  disposition_literalism?: number | null;
+  /**
+   * Disposition Empathy
+   *
+   * Deprecated: use update_bank_config instead
+   */
+  disposition_empathy?: number | null;
   /**
    * Mission
    *
-   * The agent's mission
+   * Deprecated: use update_bank_config with reflect_mission instead
    */
   mission?: string | null;
   /**
    * Background
    *
-   * Deprecated: use mission instead
+   * Deprecated: use update_bank_config with reflect_mission instead
    */
   background?: string | null;
+  /**
+   * Reflect Mission
+   *
+   * Mission/context for Reflect operations. Guides how Reflect interprets and uses memories.
+   */
+  reflect_mission?: string | null;
+  /**
+   * Retain Mission
+   *
+   * Steers what gets extracted during retain(). Injected alongside built-in extraction rules.
+   */
+  retain_mission?: string | null;
+  /**
+   * Retain Extraction Mode
+   *
+   * Fact extraction mode: 'concise' (default), 'verbose', or 'custom'.
+   */
+  retain_extraction_mode?: string | null;
+  /**
+   * Retain Custom Instructions
+   *
+   * Custom extraction prompt. Only active when retain_extraction_mode is 'custom'.
+   */
+  retain_custom_instructions?: string | null;
+  /**
+   * Retain Chunk Size
+   *
+   * Maximum token size for each content chunk during retain.
+   */
+  retain_chunk_size?: number | null;
+  /**
+   * Enable Observations
+   *
+   * Toggle automatic observation consolidation after retain().
+   */
+  enable_observations?: boolean | null;
+  /**
+   * Observations Mission
+   *
+   * Controls what gets synthesised into observations. Replaces built-in consolidation rules entirely.
+   */
+  observations_mission?: string | null;
 };
 
 /**
@@ -3589,6 +3666,48 @@ export type ClearObservationsResponses = {
 
 export type ClearObservationsResponse =
   ClearObservationsResponses[keyof ClearObservationsResponses];
+
+export type ClearMemoryObservationsData = {
+  body?: never;
+  headers?: {
+    /**
+     * Authorization
+     */
+    authorization?: string | null;
+  };
+  path: {
+    /**
+     * Bank Id
+     */
+    bank_id: string;
+    /**
+     * Memory Id
+     */
+    memory_id: string;
+  };
+  query?: never;
+  url: "/v1/default/banks/{bank_id}/memories/{memory_id}/observations";
+};
+
+export type ClearMemoryObservationsErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError;
+};
+
+export type ClearMemoryObservationsError =
+  ClearMemoryObservationsErrors[keyof ClearMemoryObservationsErrors];
+
+export type ClearMemoryObservationsResponses = {
+  /**
+   * Successful Response
+   */
+  200: ClearMemoryObservationsResponse;
+};
+
+export type ClearMemoryObservationsResponse2 =
+  ClearMemoryObservationsResponses[keyof ClearMemoryObservationsResponses];
 
 export type ResetBankConfigData = {
   body?: never;

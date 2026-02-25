@@ -1435,22 +1435,20 @@ class TestObservationDrillDown:
 
         assert result["count"] > 0, "Expected at least one observation"
 
-        # Verify source_memory_ids and proof_count are present
+        # Verify source_fact_ids is present (MemoryFact field name for source memories)
         obs = result["observations"][0]
-        assert "source_memory_ids" in obs, "Observation should have source_memory_ids"
-        assert "proof_count" in obs, "Observation should have proof_count"
-        assert obs["proof_count"] >= 1, "proof_count should be at least 1"
+        assert "source_fact_ids" in obs, "Observation should have source_fact_ids"
 
-        # If source_memory_ids exist, verify they can be used with expand
-        if obs["source_memory_ids"]:
-            assert len(obs["source_memory_ids"]) >= 1, "Should have at least one source memory"
+        # If source_fact_ids exist, verify they can be used with expand
+        if obs["source_fact_ids"]:
+            assert len(obs["source_fact_ids"]) >= 1, "Should have at least one source memory"
 
             # Use expand tool to get source memory details
             async with memory._pool.acquire() as conn:
                 expand_result = await tool_expand(
                     conn=conn,
                     bank_id=bank_id,
-                    memory_ids=obs["source_memory_ids"][:2],  # Take first 2
+                    memory_ids=obs["source_fact_ids"][:2],  # Take first 2
                     depth="chunk",
                 )
 
@@ -1717,11 +1715,10 @@ class TestHierarchicalRetrieval:
             query="What was the quarterly revenue?",
             request_context=request_context,
             max_tokens=2048,
-            max_results=10,
         )
 
         # Should have raw facts with specific numbers
-        assert recall_result["count"] >= 1, "Recall should find the raw facts"
+        assert len(recall_result["memories"]) >= 1, "Recall should find the raw facts"
 
         # Check that we get the actual numbers from the original memories
         all_memory_text = " ".join([m["text"] for m in recall_result["memories"]])
@@ -1990,3 +1987,100 @@ class TestMentalModelRefreshAfterConsolidation:
 
         # Cleanup
         await memory.delete_bank(bank_id, request_context=request_context)
+
+
+def test_consolidation_prompt_default():
+    """Test that the default consolidation prompt contains the built-in mission and processing rules."""
+    from hindsight_api.engine.consolidation.prompts import build_batch_consolidation_prompt
+
+    prompt = build_batch_consolidation_prompt()
+    assert "temporal markers" in prompt
+    assert "RESOLVE REFERENCES" in prompt
+    assert "{facts_text}" in prompt
+    assert "{observations_text}" in prompt
+
+
+def test_consolidation_prompt_observations_mission():
+    """Test that observations_mission replaces the default mission but keeps processing rules."""
+    from hindsight_api.engine.consolidation.prompts import build_batch_consolidation_prompt
+
+    spec = "Observations are weekly summaries of sprint outcomes and team dynamics."
+    prompt = build_batch_consolidation_prompt(observations_mission=spec)
+
+    # Spec is injected
+    assert spec in prompt
+    # Processing rules and output format always remain
+    assert "RESOLVE REFERENCES" in prompt
+    assert "creates" in prompt
+    assert "updates" in prompt
+    assert "{facts_text}" in prompt
+    assert "{observations_text}" in prompt
+
+    # Renders cleanly
+    rendered = prompt.format(facts_text="Alice fixed a bug.", observations_text="[]")
+    assert "{facts_text}" not in rendered
+    assert spec in rendered
+
+
+def test_observations_mission_config():
+    """Test that observations_mission is loaded from env and exposed as configurable."""
+    import os
+
+    from hindsight_api.config import HindsightConfig, _get_raw_config, clear_config_cache
+
+    original = os.getenv("HINDSIGHT_API_OBSERVATIONS_MISSION")
+    try:
+        os.environ["HINDSIGHT_API_OBSERVATIONS_MISSION"] = "Weekly sprint summaries only."
+        clear_config_cache()
+        config = _get_raw_config()
+        assert config.observations_mission == "Weekly sprint summaries only."
+        assert "observations_mission" in HindsightConfig.get_configurable_fields()
+    finally:
+        if original is None:
+            os.environ.pop("HINDSIGHT_API_OBSERVATIONS_MISSION", None)
+        else:
+            os.environ["HINDSIGHT_API_OBSERVATIONS_MISSION"] = original
+        clear_config_cache()
+
+
+@pytest.mark.asyncio
+async def test_consolidation_with_observations_mission(memory: "MemoryEngine", request_context):
+    """Test that observations_mission is used during consolidation without errors."""
+    import os
+
+    from hindsight_api.config import _get_raw_config, clear_config_cache
+
+    original = os.getenv("HINDSIGHT_API_OBSERVATIONS_MISSION")
+    try:
+        os.environ["HINDSIGHT_API_OBSERVATIONS_MISSION"] = (
+            "Observations are summaries of programming language usage patterns."
+        )
+        clear_config_cache()
+        config = _get_raw_config()
+
+        bank_id = f"test-obs-spec-{uuid.uuid4().hex[:8]}"
+        original_global_config = memory._config_resolver._global_config
+        memory._config_resolver._global_config = config
+
+        try:
+            await memory.get_bank_profile(bank_id=bank_id, request_context=request_context)
+            await memory.retain_async(
+                bank_id=bank_id,
+                content="Alice uses Python for data analysis and loves its simplicity.",
+                request_context=request_context,
+            )
+            async with memory._pool.acquire() as conn:
+                observations = await conn.fetch(
+                    "SELECT id, text, fact_type FROM memory_units WHERE bank_id = $1 AND fact_type = 'observation'",
+                    bank_id,
+                )
+            assert isinstance(observations, list)
+        finally:
+            memory._config_resolver._global_config = original_global_config
+            await memory.delete_bank(bank_id, request_context=request_context)
+    finally:
+        if original is None:
+            os.environ.pop("HINDSIGHT_API_OBSERVATIONS_MISSION", None)
+        else:
+            os.environ["HINDSIGHT_API_OBSERVATIONS_MISSION"] = original
+        clear_config_cache()

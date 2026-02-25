@@ -17,6 +17,9 @@ import type {
   ClearBankMemoriesData,
   ClearBankMemoriesErrors,
   ClearBankMemoriesResponses,
+  ClearMemoryObservationsData,
+  ClearMemoryObservationsErrors,
+  ClearMemoryObservationsResponses,
   ClearObservationsData,
   ClearObservationsErrors,
   ClearObservationsResponses,
@@ -701,6 +704,8 @@ export const getOperationStatus = <ThrowOnError extends boolean = false>(
  * Get memory bank profile
  *
  * Get disposition traits and mission for a memory bank. Auto-creates agent with defaults if not exists.
+ *
+ * @deprecated
  */
 export const getBankProfile = <ThrowOnError extends boolean = false>(
   options: Options<GetBankProfileData, ThrowOnError>,
@@ -715,6 +720,8 @@ export const getBankProfile = <ThrowOnError extends boolean = false>(
  * Update memory bank disposition
  *
  * Update bank's disposition traits (skepticism, literalism, empathy)
+ *
+ * @deprecated
  */
 export const updateBankDisposition = <ThrowOnError extends boolean = false>(
   options: Options<UpdateBankDispositionData, ThrowOnError>,
@@ -824,6 +831,23 @@ export const clearObservations = <ThrowOnError extends boolean = false>(
     ClearObservationsErrors,
     ThrowOnError
   >({ url: "/v1/default/banks/{bank_id}/observations", ...options });
+
+/**
+ * Clear observations for a memory
+ *
+ * Delete all observations derived from a specific memory and reset it for re-consolidation. The memory itself is not deleted. A consolidation job is triggered automatically so the memory will produce fresh observations on the next consolidation run.
+ */
+export const clearMemoryObservations = <ThrowOnError extends boolean = false>(
+  options: Options<ClearMemoryObservationsData, ThrowOnError>,
+) =>
+  (options.client ?? client).delete<
+    ClearMemoryObservationsResponses,
+    ClearMemoryObservationsErrors,
+    ThrowOnError
+  >({
+    url: "/v1/default/banks/{bank_id}/memories/{memory_id}/observations",
+    ...options,
+  });
 
 /**
  * Reset bank configuration

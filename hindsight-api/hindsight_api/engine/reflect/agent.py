@@ -266,7 +266,7 @@ async def run_reflect_agent(
     bank_profile: dict[str, Any],
     search_mental_models_fn: Callable[[str, int], Awaitable[dict[str, Any]]],
     search_observations_fn: Callable[[str, int], Awaitable[dict[str, Any]]],
-    recall_fn: Callable[[str, int], Awaitable[dict[str, Any]]],
+    recall_fn: Callable[[str, int, int], Awaitable[dict[str, Any]]],
     expand_fn: Callable[[list[str], str], Awaitable[dict[str, Any]]],
     context: str | None = None,
     max_iterations: int = DEFAULT_MAX_ITERATIONS,
@@ -437,15 +437,18 @@ async def run_reflect_agent(
         llm_start = time.time()
 
         # Determine tool_choice for this iteration.
+        # Force the full hierarchical retrieval path before allowing auto:
         # With mental models:
-        #   0 → search_mental_models, 1+ → auto
-        # Without mental models, enforce a minimum retrieval path:
+        #   0 → search_mental_models, 1 → search_observations, 2 → recall, 3+ → auto
+        # Without mental models:
         #   0 → search_observations, 1 → recall, 2+ → auto
         if iteration == 0 and has_mental_models:
             iter_tool_choice: str | dict = {"type": "function", "function": {"name": "search_mental_models"}}
         elif iteration == 0:
             iter_tool_choice = {"type": "function", "function": {"name": "search_observations"}}
-        elif iteration == 1 and not has_mental_models:
+        elif iteration == 1 and has_mental_models:
+            iter_tool_choice = {"type": "function", "function": {"name": "search_observations"}}
+        elif iteration == 1 or (iteration == 2 and has_mental_models):
             iter_tool_choice = {"type": "function", "function": {"name": "recall"}}
         else:
             iter_tool_choice = "auto"
@@ -816,9 +819,9 @@ async def _process_done_tool(
         answer = "No answer provided."
 
     # Validate IDs (only include IDs that were actually retrieved)
-    used_memory_ids = [mid for mid in args.get("memory_ids", []) if mid in available_memory_ids]
-    used_mental_model_ids = [mid for mid in args.get("mental_model_ids", []) if mid in available_mental_model_ids]
-    used_observation_ids = [oid for oid in args.get("observation_ids", []) if oid in available_observation_ids]
+    used_memory_ids = [mid for mid in (args.get("memory_ids") or []) if mid in available_memory_ids]
+    used_mental_model_ids = [mid for mid in (args.get("mental_model_ids") or []) if mid in available_mental_model_ids]
+    used_observation_ids = [oid for oid in (args.get("observation_ids") or []) if oid in available_observation_ids]
 
     # Generate structured output if schema provided
     structured_output = None
@@ -854,7 +857,7 @@ async def _execute_tool_with_timing(
     tc: "LLMToolCall",
     search_mental_models_fn: Callable[[str, int], Awaitable[dict[str, Any]]],
     search_observations_fn: Callable[[str, int], Awaitable[dict[str, Any]]],
-    recall_fn: Callable[[str, int], Awaitable[dict[str, Any]]],
+    recall_fn: Callable[[str, int, int], Awaitable[dict[str, Any]]],
     expand_fn: Callable[[list[str], str], Awaitable[dict[str, Any]]],
 ) -> tuple[dict[str, Any], int]:
     """Execute a tool call and return result with timing."""
@@ -926,7 +929,7 @@ async def _execute_tool(
     args: dict[str, Any],
     search_mental_models_fn: Callable[[str, int], Awaitable[dict[str, Any]]],
     search_observations_fn: Callable[[str, int], Awaitable[dict[str, Any]]],
-    recall_fn: Callable[[str, int], Awaitable[dict[str, Any]]],
+    recall_fn: Callable[[str, int, int], Awaitable[dict[str, Any]]],
     expand_fn: Callable[[list[str], str], Awaitable[dict[str, Any]]],
 ) -> dict[str, Any]:
     """Execute a single tool by name."""
@@ -952,7 +955,8 @@ async def _execute_tool(
         if not query:
             return {"error": "recall requires a query parameter"}
         max_tokens = max(int(args.get("max_tokens") or 2048), 1000)  # Default 2048, min 1000
-        return await recall_fn(query, max_tokens)
+        max_chunk_tokens = max(int(args.get("max_chunk_tokens") or 1000), 1000)  # Always enabled, min 1000
+        return await recall_fn(query, max_tokens, max_chunk_tokens)
 
     elif tool_name == "expand":
         memory_ids = args.get("memory_ids", [])
@@ -980,9 +984,9 @@ def _summarize_input(tool_name: str, args: dict[str, Any]) -> str:
     elif tool_name == "recall":
         query = args.get("query", "")
         query_preview = f"'{query[:30]}...'" if len(query) > 30 else f"'{query}'"
-        # Show actual value used (default 2048, min 1000)
         max_tokens = max(int(args.get("max_tokens") or 2048), 1000)
-        return f"(query={query_preview}, max_tokens={max_tokens})"
+        max_chunk_tokens = max(int(args.get("max_chunk_tokens") or 1000), 1000)
+        return f"(query={query_preview}, max_tokens={max_tokens}, max_chunk_tokens={max_chunk_tokens})"
     elif tool_name == "expand":
         memory_ids = args.get("memory_ids", [])
         depth = args.get("depth", "chunk")

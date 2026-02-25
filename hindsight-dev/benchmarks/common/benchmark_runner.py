@@ -455,48 +455,23 @@ class BenchmarkRunner:
         Get the count of memories pending consolidation.
 
         Returns:
-            Number of memories not yet consolidated into mental models
+            Number of memories not yet processed by the consolidation job
         """
         pool = await self.memory._get_pool()
         from hindsight_api.engine.memory_engine import fq_table
 
         async with pool.acquire() as conn:
-            # Check when consolidation last ran
-            last_consolidated_row = await conn.fetchrow(
+            result = await conn.fetchrow(
                 f"""
-                SELECT MAX(created_at) as last_consolidated_at
+                SELECT COUNT(*) as count
                 FROM {fq_table("memory_units")}
-                WHERE bank_id = $1 AND fact_type = 'mental_model'
+                WHERE bank_id = $1 AND consolidated_at IS NULL AND fact_type IN ('experience', 'world')
                 """,
                 bank_id,
             )
-            last_consolidated_at = last_consolidated_row["last_consolidated_at"] if last_consolidated_row else None
-
-            if last_consolidated_at:
-                # Count memories created after last consolidation
-                result = await conn.fetchrow(
-                    f"""
-                    SELECT COUNT(*) as count
-                    FROM {fq_table("memory_units")}
-                    WHERE bank_id = $1 AND fact_type IN ('experience', 'world')
-                    AND created_at > $2
-                    """,
-                    bank_id,
-                    last_consolidated_at,
-                )
-            else:
-                # If never consolidated, count all experience/world memories
-                result = await conn.fetchrow(
-                    f"""
-                    SELECT COUNT(*) as count
-                    FROM {fq_table("memory_units")}
-                    WHERE bank_id = $1 AND fact_type IN ('experience', 'world')
-                    """,
-                    bank_id,
-                )
             return result["count"] if result else 0
 
-    async def _wait_for_consolidation(self, bank_id: str, poll_interval: float = 2.0, timeout: float = 300.0) -> None:
+    async def _wait_for_consolidation(self, bank_id: str, poll_interval: float = 2.0, timeout: float = 3000.0) -> None:
         """
         Wait for consolidation to complete (pending_consolidation reaches 0).
 
@@ -643,9 +618,13 @@ class BenchmarkRunner:
             for q in category_5_questions:
                 logging.debug(f"  Skipped category=5 question: {q.get('question', 'N/A')[:100]}")
 
-        # Filter out category 5 and questions without answers
-        qa_pairs = [pair for pair in qa_pairs if pair.get("category") != 5 and pair.get("answer")]
-        questions_to_eval = qa_pairs[:max_questions] if max_questions else qa_pairs
+        # Filter out category 5 and questions without answers, preserving original indices
+        indexed_pairs = [
+            (orig_idx, pair)
+            for orig_idx, pair in enumerate(qa_pairs)
+            if pair.get("category") != 5 and pair.get("answer")
+        ]
+        indexed_pairs_to_eval = indexed_pairs[:max_questions] if max_questions else indexed_pairs
 
         with Progress(
             SpinnerColumn(),
@@ -655,11 +634,12 @@ class BenchmarkRunner:
             console=console,
         ) as progress:
             task = progress.add_task(
-                f"[cyan]Evaluating QA for {item_id} - {len(questions_to_eval)} questions", total=len(questions_to_eval)
+                f"[cyan]Evaluating QA for {item_id} - {len(indexed_pairs_to_eval)} questions",
+                total=len(indexed_pairs_to_eval),
             )
 
             # Create tasks for all questions
-            async def process_question(qa):
+            async def process_question(orig_idx: int, qa: dict):
                 async with semaphore:
                     question = qa["question"]
                     correct_answer = qa["answer"]
@@ -683,6 +663,7 @@ class BenchmarkRunner:
                         ]
 
                         return {
+                            "question_index": orig_idx,
                             "question": question,
                             "correct_answer": correct_answer,
                             "predicted_answer": predicted_answer,
@@ -696,9 +677,10 @@ class BenchmarkRunner:
                         logging.exception(f"Failed to answer question: {question[:100]}")
                         # Mark as invalid if answer generation failed
                         console.print(
-                            f"      [red]✗[/red] Failed to answer question: {question[:50]}... Error: {str(e)[:100]}"
+                            f"      [red]✗[/red] Failed to answer question [{orig_idx}]: {question[:50]}... Error: {str(e)[:100]}"
                         )
                         return {
+                            "question_index": orig_idx,
                             "question": question,
                             "correct_answer": correct_answer,
                             "predicted_answer": "ERROR: Failed to generate answer",
@@ -709,7 +691,7 @@ class BenchmarkRunner:
                             "error": str(e),
                         }
 
-            question_tasks = [process_question(qa) for qa in questions_to_eval]
+            question_tasks = [process_question(orig_idx, qa) for orig_idx, qa in indexed_pairs_to_eval]
 
             # Use as_completed to update progress as results come in
             results = []
@@ -853,6 +835,7 @@ class BenchmarkRunner:
         question_semaphore: asyncio.Semaphore,
         eval_semaphore_size: int = 8,
         clear_this_agent: bool = True,
+        wait_consolidation: bool = False,
     ) -> Dict:
         """
         Process a single item (ingest + evaluate).
@@ -860,6 +843,7 @@ class BenchmarkRunner:
         Args:
             clear_this_agent: Whether to clear this agent's data before ingesting.
                              Set to False to skip clearing (e.g., when agent_id is shared and already cleared)
+            wait_consolidation: If True, wait for consolidation to complete before evaluating QA.
 
         Returns:
             Result dict with metrics
@@ -883,6 +867,12 @@ class BenchmarkRunner:
             console.print(f"      [green]✓[/green] Ingested {num_sessions} sessions")
         else:
             num_sessions = -1
+
+        # Wait for consolidation before evaluating if requested
+        if wait_consolidation:
+            step += 1
+            console.print(f"  [{step}] Waiting for consolidation...")
+            await self._wait_for_consolidation(agent_id)
 
         # Evaluate QA
         step += 1
@@ -927,6 +917,7 @@ class BenchmarkRunner:
         max_concurrent_items: int = 1,  # Max concurrent items (conversations) to process in parallel
         output_path: Optional[Path] = None,  # Path to save results incrementally
         merge_with_existing: bool = False,  # Whether to merge with existing results
+        wait_consolidation: bool = False,  # Wait for consolidation to complete before evaluating QA
     ) -> Dict[str, Any]:
         """
         Run the full benchmark evaluation.
@@ -1004,6 +995,7 @@ class BenchmarkRunner:
                 max_concurrent_items,
                 output_path,
                 merge_with_existing,
+                wait_consolidation,
             )
 
     async def _run_single_phase(
@@ -1021,6 +1013,7 @@ class BenchmarkRunner:
         max_concurrent_items: int = 1,
         output_path: Optional[Path] = None,
         merge_with_existing: bool = False,
+        wait_consolidation: bool = False,
     ) -> Dict[str, Any]:
         """Original single-phase approach: process each item independently."""
         # Create semaphore for question processing
@@ -1042,6 +1035,7 @@ class BenchmarkRunner:
                 max_concurrent_items,
                 output_path,
                 merge_with_existing,
+                wait_consolidation,
             )
         else:
             # Sequential item processing (original behavior)
@@ -1058,6 +1052,7 @@ class BenchmarkRunner:
                 filln,
                 output_path,
                 merge_with_existing,
+                wait_consolidation,
             )
 
         # Calculate overall metrics
@@ -1093,6 +1088,7 @@ class BenchmarkRunner:
         filln: bool,
         output_path: Optional[Path] = None,
         merge_with_existing: bool = False,
+        wait_consolidation: bool = False,
     ) -> List[Dict]:
         """Process items sequentially (original behavior)."""
         all_results = []
@@ -1140,6 +1136,7 @@ class BenchmarkRunner:
                 question_semaphore,
                 eval_semaphore_size,
                 clear_this_agent,
+                wait_consolidation,
             )
 
             # Replace existing result or append new one
@@ -1171,6 +1168,7 @@ class BenchmarkRunner:
         max_concurrent_items: int,
         output_path: Optional[Path] = None,
         merge_with_existing: bool = False,
+        wait_consolidation: bool = False,
     ) -> List[Dict]:
         """Process items in parallel (requires unique agent IDs per item)."""
         # Load existing results if merge_with_existing is True
@@ -1215,6 +1213,7 @@ class BenchmarkRunner:
                     question_semaphore,
                     eval_semaphore_size,
                     clear_this_agent=True,  # Always clear for parallel processing
+                    wait_consolidation=wait_consolidation,
                 )
                 return result
 

@@ -24,6 +24,36 @@ openclaw gateway
 
 That's it! The plugin will automatically start capturing and recalling memories.
 
+## Features
+
+- **Auto-capture** and **auto-recall** of memories each turn
+- **Memory isolation** — configurable per agent, channel, user, or provider via `dynamicBankGranularity`
+- **Retention controls** — choose which message roles to retain and toggle auto-retain on/off
+
+## Configuration
+
+Optional settings in `~/.openclaw/openclaw.json` under `plugins.entries.hindsight-openclaw.config`:
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `apiPort` | `9077` | Port for the local Hindsight daemon |
+| `daemonIdleTimeout` | `0` | Seconds before daemon shuts down from inactivity (0 = never) |
+| `embedVersion` | `"latest"` | hindsight-embed version |
+| `bankMission` | — | Agent identity/purpose stored on the memory bank. Helps the engine understand context for better fact extraction. Set once per bank — not a recall prompt. |
+| `dynamicBankId` | `true` | Enable per-context memory banks |
+| `bankIdPrefix` | — | Prefix for bank IDs (e.g. `"prod"`) |
+| `dynamicBankGranularity` | `["agent", "channel", "user"]` | Fields used to derive bank ID. Options: `agent`, `channel`, `user`, `provider` |
+| `excludeProviders` | `[]` | Message providers to skip for recall/retain (e.g. `slack`, `telegram`, `discord`) |
+| `autoRecall` | `true` | Auto-inject memories before each turn. Set to `false` when the agent has its own recall tool. |
+| `autoRetain` | `true` | Auto-retain conversations after each turn |
+| `retainRoles` | `["user", "assistant"]` | Which message roles to retain. Options: `user`, `assistant`, `system`, `tool` |
+| `recallBudget` | `"mid"` | Recall effort: `low`, `mid`, or `high`. Higher budgets use more retrieval strategies. |
+| `recallMaxTokens` | `2048` | Max tokens for recall response. Controls how much memory context is injected per turn. |
+| `recallTypes` | `["world", "experience"]` | Memory types to recall. Options: `world`, `experience`, `observation`. Excludes verbose `observation` entries by default. |
+| `recallTopK` | — | Max number of memories to inject per turn. Applied after API response as a hard cap. |
+| `hindsightApiUrl` | — | External Hindsight API URL (skips local daemon) |
+| `hindsightApiToken` | — | Auth token for external API |
+
 ## Documentation
 
 For full documentation, configuration options, troubleshooting, and development guide, see:
