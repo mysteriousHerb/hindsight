@@ -886,8 +886,6 @@ export default function (api: MoltbotPluginAPI) {
 Relevant memories from past conversations (prioritize recent when conflicting). Only use memories that are directly useful to continue this conversation — ignore the rest:
 
 ${memoriesFormatted}
-
-User message: ${prompt}
 </hindsight_memories>`;
 
         console.log(`[Hindsight] Auto-recall: Injecting ${results.length} memories from bank ${bankId}`);
