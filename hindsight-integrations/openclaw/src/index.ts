@@ -519,6 +519,7 @@ function getPluginConfig(api: MoltbotPluginAPI): PluginConfig {
     recallBudget: config.recallBudget || 'mid',
     recallMaxTokens: config.recallMaxTokens || 2048,
     recallTypes: Array.isArray(config.recallTypes) ? config.recallTypes : ['world', 'experience'],
+    recallTopK: typeof config.recallTopK === 'number' ? config.recallTopK : undefined,
   };
 }
 
@@ -875,10 +876,12 @@ export default function (api: MoltbotPluginAPI) {
           return;
         }
 
-        console.log(`[Hindsight] Auto-recall results (${response.results.length}): ${response.results.map(r => `[${r.type}] ${r.text?.substring(0, 60)}`).join(' | ')}`);
+        const results = pluginConfig.recallTopK ? response.results.slice(0, pluginConfig.recallTopK) : response.results;
+
+        console.log(`[Hindsight] Auto-recall results (${results.length}): ${results.map(r => `[${r.type}] ${r.text?.substring(0, 60)}`).join(' | ')}`);
 
         // Format memories as JSON with all fields from recall
-        const memoriesFormatted = formatMemories(response.results);
+        const memoriesFormatted = formatMemories(results);
 
         const contextMessage = `<hindsight_memories>
 Relevant memories from past conversations (prioritize recent when conflicting):
@@ -887,7 +890,7 @@ ${memoriesFormatted}
 User message: ${prompt}
 </hindsight_memories>`;
 
-        console.log(`[Hindsight] Auto-recall: Injecting ${response.results.length} memories from bank ${bankId}`);
+        console.log(`[Hindsight] Auto-recall: Injecting ${results.length} memories from bank ${bankId}`);
 
         // Inject context before the user message
         return { prependContext: contextMessage };

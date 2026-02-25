@@ -59,6 +59,7 @@ export interface PluginConfig {
   recallBudget?: 'low' | 'mid' | 'high'; // Recall effort. Default: 'mid'
   recallMaxTokens?: number; // Max tokens for recall response. Default: 2048
   recallTypes?: Array<'world' | 'experience' | 'observation'>; // Memory types to recall. Default: ['world', 'experience']
+  recallTopK?: number; // Max number of memories to inject. Default: unlimited
 }
 
 export interface ServiceConfig {
