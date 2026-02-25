@@ -290,7 +290,7 @@ export function formatMemories(results: MemoryResult[]): string {
       const date = r.mentioned_at ? ` (${r.mentioned_at})` : '';
       return `- ${r.text}${type}${date}`;
     })
-    .join('\n');
+    .join('\n\n');
 }
 
 

@@ -189,7 +189,7 @@ describe('formatMemories', () => {
       { id: '2', text: 'User is learning Rust', type: 'experience', mentioned_at: null } as any,
     ];
     const output = formatMemories(memories);
-    expect(output).toBe('- User prefers dark mode [world] (2023-01-01T12:00:00Z)\n- User is learning Rust [experience]');
+    expect(output).toBe('- User prefers dark mode [world] (2023-01-01T12:00:00Z)\n\n- User is learning Rust [experience]');
   });
 
   it('returns empty string for empty memories', () => {
