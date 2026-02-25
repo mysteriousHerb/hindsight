@@ -884,6 +884,7 @@ export default function (api: MoltbotPluginAPI) {
 
         const contextMessage = `<hindsight_memories>
 Relevant memories from past conversations (prioritize recent when conflicting). Only use memories that are directly useful to continue this conversation — ignore the rest:
+
 ${memoriesFormatted}
 
 User message: ${prompt}
