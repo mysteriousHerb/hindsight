@@ -178,8 +178,8 @@ export function extractRecallQuery(
     recallQuery = prompt;
     // Strip leading "Conversation info (untrusted metadata): ```json ... ```" block if present,
     // then check if anything useful remains. If nothing remains, it's a bare metadata fire — skip.
-    if (recallQuery && /^\s*(?:conversation info\s*)?\(untrusted metadata\)/i.test(recallQuery)) {
-      const stripped = recallQuery.replace(/^\s*(?:conversation info\s*)?\(untrusted metadata\)[^\n]*\n```json[\s\S]*?```\s*/i, '').trim();
+    if (recallQuery && /^\s*(?:[\w\s]+\s*)?\(untrusted metadata\)/i.test(recallQuery)) {
+      const stripped = recallQuery.replace(/^\s*(?:[\w\s]+\s*)?\(untrusted metadata\)[^\n]*\n```json[\s\S]*?```\s*/i, '').trim();
       if (!stripped || stripped.length < 5) {
         return null;
       }
