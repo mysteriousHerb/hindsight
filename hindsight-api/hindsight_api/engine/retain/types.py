@@ -6,8 +6,8 @@ from content input to fact storage.
 """
 
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
-from typing import TypedDict
+from datetime import datetime
+from typing import Literal, TypedDict
 from uuid import UUID
 
 
@@ -22,20 +22,21 @@ class RetainContentDict(TypedDict, total=False):
         document_id: Document ID for this content item (optional)
         entities: User-provided entities to merge with extracted entities (optional)
         tags: Visibility scope tags for this content item (optional)
+        observation_scopes: How to scope observations for consolidation (optional).
+            "per_tag" runs one pass per individual tag; "combined" (default) runs a
+            single pass with all tags; a list[list[str]] specifies exact passes.
     """
 
     content: str  # Required
     context: str
-    event_date: datetime
+    event_date: datetime | None
     metadata: dict[str, str]
     document_id: str
     entities: list[dict[str, str]]  # [{"text": "...", "type": "..."}]
     tags: list[str]  # Visibility scope tags
-
-
-def _now_utc() -> datetime:
-    """Factory function for default event_date."""
-    return datetime.now(UTC)
+    observation_scopes: (
+        Literal["per_tag", "combined", "all_combinations"] | list[list[str]]
+    )  # Observation scopes for consolidation
 
 
 @dataclass
@@ -48,10 +49,13 @@ class RetainContent:
 
     content: str
     context: str = ""
-    event_date: datetime = field(default_factory=_now_utc)
+    event_date: datetime | None = None
     metadata: dict[str, str] = field(default_factory=dict)
     entities: list[dict[str, str]] = field(default_factory=list)  # User-provided entities
     tags: list[str] = field(default_factory=list)  # Visibility scope tags
+    observation_scopes: Literal["per_tag", "combined", "all_combinations"] | list[list[str]] | None = (
+        None  # Observation scopes
+    )
 
 
 @dataclass
@@ -117,6 +121,9 @@ class ExtractedFact:
     mentioned_at: datetime | None = None
     metadata: dict[str, str] = field(default_factory=dict)
     tags: list[str] = field(default_factory=list)  # Visibility scope tags
+    observation_scopes: Literal["per_tag", "combined", "all_combinations"] | list[list[str]] | None = (
+        None  # Observation scopes
+    )
 
 
 @dataclass
@@ -135,7 +142,7 @@ class ProcessedFact:
     # Temporal data
     occurred_start: datetime | None
     occurred_end: datetime | None
-    mentioned_at: datetime
+    mentioned_at: datetime | None
 
     # Context and metadata
     context: str
@@ -165,6 +172,9 @@ class ProcessedFact:
     # Visibility scope tags
     tags: list[str] = field(default_factory=list)
 
+    # Observation scopes for consolidation
+    observation_scopes: Literal["per_tag", "combined", "all_combinations"] | list[list[str]] | None = None
+
     @property
     def is_duplicate(self) -> bool:
         """Check if this fact was marked as a duplicate."""
@@ -185,12 +195,10 @@ class ProcessedFact:
         Returns:
             ProcessedFact ready for storage
         """
-        from datetime import datetime
-
         # Use occurred dates only if explicitly provided by LLM
         occurred_start = extracted_fact.occurred_start
         occurred_end = extracted_fact.occurred_end
-        mentioned_at = extracted_fact.mentioned_at or datetime.now(UTC)
+        mentioned_at = extracted_fact.mentioned_at  # May be None when caller opted into no timestamp
 
         # Convert entity strings to EntityRef objects
         entities = [EntityRef(name=name) for name in extracted_fact.entities]
@@ -209,6 +217,7 @@ class ProcessedFact:
             chunk_id=chunk_id,
             content_index=extracted_fact.content_index,
             tags=extracted_fact.tags,
+            observation_scopes=extracted_fact.observation_scopes,
         )
 
 

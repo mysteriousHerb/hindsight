@@ -1165,6 +1165,8 @@ export type MemoryItem = {
   content: string;
   /**
    * Timestamp
+   *
+   * When the content occurred. Accepts an ISO 8601 datetime string (e.g. '2024-01-15T10:30:00Z'), null/omitted (defaults to now), or the special string 'unset' to explicitly store without any timestamp (use this for timeless content such as fictional documents or static reference material).
    */
   timestamp?: string | null;
   /**
@@ -1195,6 +1197,17 @@ export type MemoryItem = {
    * Optional tags for visibility scoping. Memories with tags can be filtered during recall.
    */
   tags?: Array<string> | null;
+  /**
+   * ObservationScopes
+   *
+   * How to scope observations during consolidation. 'per_tag' runs one consolidation pass per individual tag, creating separate observations for each tag. 'combined' (default) runs a single pass with all tags together. A list of tag lists runs one pass per inner list, giving full control over which combinations to use.
+   */
+  observation_scopes?:
+    | "per_tag"
+    | "combined"
+    | "all_combinations"
+    | Array<Array<string>>
+    | null;
 };
 
 /**
@@ -3069,8 +3082,22 @@ export type ListDocumentsData = {
   query?: {
     /**
      * Q
+     *
+     * Case-insensitive substring filter on document ID (e.g. 'report' matches 'report-2024')
      */
     q?: string | null;
+    /**
+     * Tags
+     *
+     * Filter documents by tags
+     */
+    tags?: Array<string> | null;
+    /**
+     * Tags Match
+     *
+     * How to match tags: 'any', 'all', 'any_strict', 'all_strict'
+     */
+    tags_match?: string;
     /**
      * Limit
      */

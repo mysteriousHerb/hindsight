@@ -184,7 +184,7 @@ from .retain import bank_utils, embedding_utils
 from .retain.types import RetainContentDict
 from .search import think_utils
 from .search.reranking import CrossEncoderReranker
-from .search.tags import TagsMatch
+from .search.tags import TagsMatch, build_tags_where_clause
 from .task_backend import BrokerTaskBackend, SyncTaskBackend, TaskBackend
 
 
@@ -925,8 +925,6 @@ class MemoryEngine(MemoryEngineInterface):
         """
         task_type = task_dict.get("type")
         operation_id = task_dict.get("operation_id")
-        retry_count = task_dict.get("retry_count", 0)
-        max_retries = 3
 
         # Set schema context for multi-tenant task execution
         schema = task_dict.pop("_schema", None)
@@ -972,30 +970,22 @@ class MemoryEngine(MemoryEngineInterface):
                 await self._mark_operation_completed(operation_id)
 
         except Exception as e:
-            # Task failed - check if we should retry
-            logger.error(
-                f"Task execution failed (attempt {retry_count + 1}/{max_retries + 1}): {task_type}, error: {e}"
-            )
+            logger.error(f"Task execution failed: {task_type}, error: {e}")
             import traceback
 
             error_traceback = traceback.format_exc()
             traceback.print_exc()
 
-            # Don't retry file conversion - if conversion fails, it won't succeed on retry
-            # (missing OCR, corrupted file, unsupported format, etc.)
-            should_retry = retry_count < max_retries and task_type != "file_convert_retain"
-
-            if should_retry:
-                # Reschedule with incremented retry count
-                task_dict["retry_count"] = retry_count + 1
-                logger.info(f"Rescheduling task {task_type} (retry {retry_count + 1}/{max_retries})")
-                await self._task_backend.submit_task(task_dict)
-            else:
-                # Max retries exceeded or non-retryable task - mark operation as failed
-                reason = "non-retryable task type" if task_type == "file_convert_retain" else "max retries exceeded"
-                logger.error(f"Not retrying task {task_type} ({reason}), marking as failed")
+            if task_type == "file_convert_retain":
+                # Non-retryable: mark as failed immediately.
+                # Conversion failures won't improve on retry (missing OCR, corrupted file, etc.)
+                logger.error(f"Not retrying task {task_type} (non-retryable), marking as failed")
                 if operation_id:
                     await self._mark_operation_failed(operation_id, str(e), error_traceback)
+            else:
+                # Retryable: re-raise so the worker poller handles retry/fail via _retry_or_fail,
+                # which correctly resets status='pending' and increments the DB retry_count.
+                raise
 
     async def _delete_operation_record(self, operation_id: str):
         """Helper to delete an operation record from the database."""
@@ -3120,6 +3110,11 @@ class MemoryEngine(MemoryEngineInterface):
             Dictionary with document info or None if not found
         """
         await self._authenticate_tenant(request_context)
+        if self._operation_validator:
+            from hindsight_api.extensions import BankReadContext
+
+            ctx = BankReadContext(bank_id=bank_id, operation="get_document", request_context=request_context)
+            await self._validate_operation(self._operation_validator.validate_bank_read(ctx))
         pool = await self._get_pool()
         async with acquire_with_retry(pool) as conn:
             doc = await conn.fetchrow(
@@ -3168,6 +3163,11 @@ class MemoryEngine(MemoryEngineInterface):
             Dictionary with counts of deleted items
         """
         await self._authenticate_tenant(request_context)
+        if self._operation_validator:
+            from hindsight_api.extensions import BankWriteContext
+
+            ctx = BankWriteContext(bank_id=bank_id, operation="delete_document", request_context=request_context)
+            await self._validate_operation(self._operation_validator.validate_bank_write(ctx))
         pool = await self._get_pool()
         invalidated_obs = 0
         async with acquire_with_retry(pool) as conn:
@@ -3292,6 +3292,11 @@ class MemoryEngine(MemoryEngineInterface):
             Dictionary with counts of deleted items
         """
         await self._authenticate_tenant(request_context)
+        if self._operation_validator:
+            from hindsight_api.extensions import BankWriteContext
+
+            ctx = BankWriteContext(bank_id=bank_id, operation="delete_bank", request_context=request_context)
+            await self._validate_operation(self._operation_validator.validate_bank_write(ctx))
         pool = await self._get_pool()
         invalidated_obs = 0
         result: dict[str, int] = {}
@@ -3385,6 +3390,11 @@ class MemoryEngine(MemoryEngineInterface):
             Dictionary with count of deleted observations
         """
         await self._authenticate_tenant(request_context)
+        if self._operation_validator:
+            from hindsight_api.extensions import BankWriteContext
+
+            ctx = BankWriteContext(bank_id=bank_id, operation="clear_observations", request_context=request_context)
+            await self._validate_operation(self._operation_validator.validate_bank_write(ctx))
         pool = await self._get_pool()
         async with acquire_with_retry(pool) as conn:
             async with conn.transaction():
@@ -3438,6 +3448,13 @@ class MemoryEngine(MemoryEngineInterface):
             Dictionary with count of deleted observations
         """
         await self._authenticate_tenant(request_context)
+        if self._operation_validator:
+            from hindsight_api.extensions import BankWriteContext
+
+            ctx = BankWriteContext(
+                bank_id=bank_id, operation="clear_observations_for_memory", request_context=request_context
+            )
+            await self._validate_operation(self._operation_validator.validate_bank_write(ctx))
         pool = await self._get_pool()
         deleted_count = 0
 
@@ -3484,6 +3501,11 @@ class MemoryEngine(MemoryEngineInterface):
             Dictionary with consolidation stats
         """
         await self._authenticate_tenant(request_context)
+        if self._operation_validator:
+            from hindsight_api.extensions import BankWriteContext
+
+            ctx = BankWriteContext(bank_id=bank_id, operation="run_consolidation", request_context=request_context)
+            await self._validate_operation(self._operation_validator.validate_bank_write(ctx))
 
         from .consolidation import run_consolidation_job
 
@@ -3529,6 +3551,11 @@ class MemoryEngine(MemoryEngineInterface):
             Dict with nodes, edges, table_rows, total_units, and limit
         """
         await self._authenticate_tenant(request_context)
+        if self._operation_validator:
+            from hindsight_api.extensions import BankReadContext
+
+            ctx = BankReadContext(bank_id=bank_id, operation="get_graph_data", request_context=request_context)
+            await self._validate_operation(self._operation_validator.validate_bank_read(ctx))
         pool = await self._get_pool()
         async with acquire_with_retry(pool) as conn:
             # Get memory units, optionally filtered by bank_id and fact_type
@@ -3646,7 +3673,7 @@ class MemoryEngine(MemoryEngineInterface):
                         # Only include if the target is visible
                         if to_id in unit_id_set or to_observations:
                             target = to_observations[0] if to_observations and to_id not in unit_id_set else to_id
-                            if target in unit_id_set:
+                            if target in unit_id_set and obs_id != target:
                                 copied_links.append(
                                     {
                                         "from_unit_id": obs_id,
@@ -3660,15 +3687,16 @@ class MemoryEngine(MemoryEngineInterface):
                 # If to_id is a source memory, copy links to its observations
                 if to_observations and from_id in unit_id_set:
                     for obs_id in to_observations:
-                        copied_links.append(
-                            {
-                                "from_unit_id": from_id,
-                                "to_unit_id": obs_id,
-                                "link_type": link["link_type"],
-                                "weight": link["weight"],
-                                "entity_name": link["entity_name"],
-                            }
-                        )
+                        if from_id != obs_id:
+                            copied_links.append(
+                                {
+                                    "from_unit_id": from_id,
+                                    "to_unit_id": obs_id,
+                                    "link_type": link["link_type"],
+                                    "weight": link["weight"],
+                                    "entity_name": link["entity_name"],
+                                }
+                            )
 
             # Keep only direct links between visible nodes
             direct_links = [
@@ -3737,9 +3765,63 @@ class MemoryEngine(MemoryEngineInterface):
                 }
             )
 
-        # Build edges (combine direct links and copied links from sources)
+        # Build observation-inferred links from inherited entities and shared source memories.
+        # Observations never have direct memory_links rows, so all their links must be derived.
+        observation_units = [unit for unit in units if unit["fact_type"] == "observation"]
+        observation_ids = {unit["id"] for unit in observation_units}
+
+        # Entity links: pair observations that share at least one inherited entity
+        entity_to_observations: dict[str, list] = {}
+        for obs_id in observation_ids:
+            for entity_name in entity_map.get(obs_id, []):
+                entity_to_observations.setdefault(entity_name, []).append(obs_id)
+
+        # Semantic links: pair observations that share at least one source memory
+        source_to_obs_for_semantic: dict = {}
+        for unit in observation_units:
+            if unit["source_memory_ids"]:
+                for src_id in unit["source_memory_ids"]:
+                    source_to_obs_for_semantic.setdefault(src_id, []).append(unit["id"])
+
+        observation_inferred_links = []
+        seen_inferred: set[tuple] = set()
+
+        for entity_name, obs_ids in entity_to_observations.items():
+            for i, obs_a in enumerate(obs_ids):
+                for obs_b in obs_ids[i + 1 :]:
+                    pair = (min(str(obs_a), str(obs_b)), max(str(obs_a), str(obs_b)), "entity", entity_name)
+                    if pair not in seen_inferred:
+                        seen_inferred.add(pair)
+                        observation_inferred_links.append(
+                            {
+                                "from_unit_id": obs_a,
+                                "to_unit_id": obs_b,
+                                "link_type": "entity",
+                                "weight": 1.0,
+                                "entity_name": entity_name,
+                            }
+                        )
+
+        for src_id, obs_ids in source_to_obs_for_semantic.items():
+            for i, obs_a in enumerate(obs_ids):
+                for obs_b in obs_ids[i + 1 :]:
+                    pair = (min(str(obs_a), str(obs_b)), max(str(obs_a), str(obs_b)), "semantic", "")
+                    if pair not in seen_inferred:
+                        seen_inferred.add(pair)
+                        observation_inferred_links.append(
+                            {
+                                "from_unit_id": obs_a,
+                                "to_unit_id": obs_b,
+                                "link_type": "semantic",
+                                "weight": 1.0,
+                                "entity_name": None,
+                            }
+                        )
+
+        # Build edges (combine direct links, copied links from sources, and observation-inferred links)
         edges = []
-        all_links = direct_links + copied_links
+        seen_edges: set[tuple] = set()
+        all_links = direct_links + copied_links + observation_inferred_links
         for row in all_links:
             from_id = str(row["from_unit_id"])
             to_id = str(row["to_unit_id"])
@@ -3760,6 +3842,11 @@ class MemoryEngine(MemoryEngineInterface):
             else:
                 color = "#999999"
                 line_style = "solid"
+
+            edge_key = (from_id, to_id, link_type, entity_name or "")
+            if edge_key in seen_edges:
+                continue
+            seen_edges.add(edge_key)
 
             edges.append(
                 {
@@ -3830,6 +3917,11 @@ class MemoryEngine(MemoryEngineInterface):
             Dict with items (list of memory units) and total count
         """
         await self._authenticate_tenant(request_context)
+        if self._operation_validator:
+            from hindsight_api.extensions import BankReadContext
+
+            ctx = BankReadContext(bank_id=bank_id, operation="list_memory_units", request_context=request_context)
+            await self._validate_operation(self._operation_validator.validate_bank_read(ctx))
         pool = await self._get_pool()
         async with acquire_with_retry(pool) as conn:
             # Build query conditions
@@ -3952,13 +4044,19 @@ class MemoryEngine(MemoryEngineInterface):
             Dict with memory unit data or None if not found
         """
         await self._authenticate_tenant(request_context)
+        if self._operation_validator:
+            from hindsight_api.extensions import BankReadContext
+
+            ctx = BankReadContext(bank_id=bank_id, operation="get_memory_unit", request_context=request_context)
+            await self._validate_operation(self._operation_validator.validate_bank_read(ctx))
         pool = await self._get_pool()
         async with acquire_with_retry(pool) as conn:
             # Get the memory unit (include source_memory_ids for mental models)
             row = await conn.fetchrow(
                 f"""
                 SELECT id, text, context, event_date, occurred_start, occurred_end,
-                       mentioned_at, fact_type, document_id, chunk_id, tags, source_memory_ids
+                       mentioned_at, fact_type, document_id, chunk_id, tags, source_memory_ids,
+                       observation_scopes
                 FROM {fq_table("memory_units")}
                 WHERE id = $1 AND bank_id = $2
                 """,
@@ -3981,6 +4079,19 @@ class MemoryEngine(MemoryEngineInterface):
             )
             entities = [r["canonical_name"] for r in entities_rows]
 
+            # For observations with no direct entities, inherit from source memories
+            if not entities and row["fact_type"] == "observation" and row["source_memory_ids"]:
+                source_entities_rows = await conn.fetch(
+                    f"""
+                    SELECT DISTINCT e.canonical_name
+                    FROM {fq_table("unit_entities")} ue
+                    JOIN {fq_table("entities")} e ON ue.entity_id = e.id
+                    WHERE ue.unit_id = ANY($1::uuid[])
+                    """,
+                    row["source_memory_ids"],
+                )
+                entities = [r["canonical_name"] for r in source_entities_rows]
+
             result = {
                 "id": str(row["id"]),
                 "text": row["text"],
@@ -3994,6 +4105,7 @@ class MemoryEngine(MemoryEngineInterface):
                 "document_id": row["document_id"] if row["document_id"] else None,
                 "chunk_id": str(row["chunk_id"]) if row["chunk_id"] else None,
                 "tags": row["tags"] if row["tags"] else [],
+                "observation_scopes": row["observation_scopes"] if row["observation_scopes"] else None,
             }
 
             # For observations, include source_memory_ids and fetch source_memories
@@ -4030,6 +4142,8 @@ class MemoryEngine(MemoryEngineInterface):
         bank_id: str,
         *,
         search_query: str | None = None,
+        tags: list[str] | None = None,
+        tags_match: "TagsMatch" = "any_strict",
         limit: int = 100,
         offset: int = 0,
         request_context: "RequestContext",
@@ -4040,6 +4154,8 @@ class MemoryEngine(MemoryEngineInterface):
         Args:
             bank_id: bank ID (required)
             search_query: Search in document ID
+            tags: Filter by tags
+            tags_match: How to match tags (any, all, any_strict, all_strict)
             limit: Maximum number of results
             offset: Offset for pagination
             request_context: Request context for authentication.
@@ -4048,6 +4164,11 @@ class MemoryEngine(MemoryEngineInterface):
             Dict with items (list of documents without original_text) and total count
         """
         await self._authenticate_tenant(request_context)
+        if self._operation_validator:
+            from hindsight_api.extensions import BankReadContext
+
+            ctx = BankReadContext(bank_id=bank_id, operation="list_documents", request_context=request_context)
+            await self._validate_operation(self._operation_validator.validate_bank_read(ctx))
         pool = await self._get_pool()
         async with acquire_with_retry(pool) as conn:
             # Build query conditions
@@ -4065,7 +4186,16 @@ class MemoryEngine(MemoryEngineInterface):
                 query_conditions.append(f"id ILIKE ${param_count}")
                 query_params.append(f"%{search_query}%")
 
+            tags_clause, tags_params, next_param = build_tags_where_clause(
+                tags, param_offset=param_count + 1, match=tags_match
+            )
+            query_params.extend(tags_params)
+            param_count = next_param - 1  # next_param is next available; convert to last used
+
             where_clause = "WHERE " + " AND ".join(query_conditions) if query_conditions else ""
+            if tags_clause:
+                # tags_clause starts with "AND", append after WHERE conditions
+                where_clause = where_clause + " " + tags_clause if where_clause else "WHERE " + tags_clause[4:].lstrip()
 
             # Get total count
             count_query = f"""
@@ -4194,6 +4324,12 @@ class MemoryEngine(MemoryEngineInterface):
             if not chunk:
                 return None
 
+            if self._operation_validator:
+                from hindsight_api.extensions import BankReadContext
+
+                ctx = BankReadContext(bank_id=chunk["bank_id"], operation="get_chunk", request_context=request_context)
+                await self._validate_operation(self._operation_validator.validate_bank_read(ctx))
+
             return {
                 "chunk_id": chunk["chunk_id"],
                 "document_id": chunk["document_id"],
@@ -4223,6 +4359,11 @@ class MemoryEngine(MemoryEngineInterface):
             Dict with name, disposition traits, and mission
         """
         await self._authenticate_tenant(request_context)
+        if self._operation_validator:
+            from hindsight_api.extensions import BankReadContext
+
+            ctx = BankReadContext(bank_id=bank_id, operation="get_bank_profile", request_context=request_context)
+            await self._validate_operation(self._operation_validator.validate_bank_read(ctx))
         pool = await self._get_pool()
         profile = await bank_utils.get_bank_profile(pool, bank_id)
 
@@ -4265,6 +4406,13 @@ class MemoryEngine(MemoryEngineInterface):
             request_context: Request context for authentication.
         """
         await self._authenticate_tenant(request_context)
+        if self._operation_validator:
+            from hindsight_api.extensions import BankWriteContext
+
+            ctx = BankWriteContext(
+                bank_id=bank_id, operation="update_bank_disposition", request_context=request_context
+            )
+            await self._validate_operation(self._operation_validator.validate_bank_write(ctx))
         pool = await self._get_pool()
         await bank_utils.update_bank_disposition(pool, bank_id, disposition)
 
@@ -4287,6 +4435,11 @@ class MemoryEngine(MemoryEngineInterface):
             Dict with bank_id and mission.
         """
         await self._authenticate_tenant(request_context)
+        if self._operation_validator:
+            from hindsight_api.extensions import BankWriteContext
+
+            ctx = BankWriteContext(bank_id=bank_id, operation="set_bank_mission", request_context=request_context)
+            await self._validate_operation(self._operation_validator.validate_bank_write(ctx))
         pool = await self._get_pool()
         await bank_utils.set_bank_mission(pool, bank_id, mission)
         return {"bank_id": bank_id, "mission": mission}
@@ -4311,6 +4464,11 @@ class MemoryEngine(MemoryEngineInterface):
             Dict with 'mission' (str) key
         """
         await self._authenticate_tenant(request_context)
+        if self._operation_validator:
+            from hindsight_api.extensions import BankWriteContext
+
+            ctx = BankWriteContext(bank_id=bank_id, operation="merge_bank_mission", request_context=request_context)
+            await self._validate_operation(self._operation_validator.validate_bank_write(ctx))
         pool = await self._get_pool()
         return await bank_utils.merge_bank_mission(pool, self._reflect_llm_config, bank_id, new_info)
 
@@ -4330,7 +4488,15 @@ class MemoryEngine(MemoryEngineInterface):
         """
         await self._authenticate_tenant(request_context)
         pool = await self._get_pool()
-        return await bank_utils.list_banks(pool)
+        banks = await bank_utils.list_banks(pool)
+        if self._operation_validator:
+            from hindsight_api.extensions import BankListContext
+
+            result = await self._operation_validator.filter_bank_list(
+                BankListContext(banks=banks, request_context=request_context)
+            )
+            banks = result.banks
+        return banks
 
     # ==================== Reflect Methods ====================
 
@@ -4419,6 +4585,7 @@ class MemoryEngine(MemoryEngineInterface):
         budget_multipliers = {Budget.LOW: 0.5, Budget.MID: 1.0, Budget.HIGH: 2.0}
         effective_budget = budget or Budget.LOW
         max_iterations = max(1, int(base_max_iterations * budget_multipliers.get(effective_budget, 1.0)))
+        max_context_tokens = config.reflect_max_context_tokens
 
         # Run agentic loop - acquire connections only when needed for DB operations
         # (not held during LLM calls which can be slow)
@@ -4528,6 +4695,7 @@ class MemoryEngine(MemoryEngineInterface):
                 directives=directives,
                 has_mental_models=has_mental_models,
                 budget=effective_budget,
+                max_context_tokens=max_context_tokens,
             )
 
             total_time = time.time() - reflect_start
@@ -4738,6 +4906,11 @@ class MemoryEngine(MemoryEngineInterface):
             Dict with items, total, limit, offset
         """
         await self._authenticate_tenant(request_context)
+        if self._operation_validator:
+            from hindsight_api.extensions import BankReadContext
+
+            ctx = BankReadContext(bank_id=bank_id, operation="list_entities", request_context=request_context)
+            await self._validate_operation(self._operation_validator.validate_bank_read(ctx))
         pool = await self._get_pool()
         async with acquire_with_retry(pool) as conn:
             # Get total count
@@ -4825,6 +4998,11 @@ class MemoryEngine(MemoryEngineInterface):
             Dict with items (list of {tag, count}), total, limit, offset
         """
         await self._authenticate_tenant(request_context)
+        if self._operation_validator:
+            from hindsight_api.extensions import BankReadContext
+
+            ctx = BankReadContext(bank_id=bank_id, operation="list_tags", request_context=request_context)
+            await self._validate_operation(self._operation_validator.validate_bank_read(ctx))
         pool = await self._get_pool()
         async with acquire_with_retry(pool) as conn:
             # Build pattern filter if provided (convert * to % for ILIKE)
@@ -4901,6 +5079,11 @@ class MemoryEngine(MemoryEngineInterface):
             EntityState with empty observations (summaries now in mental models)
         """
         await self._authenticate_tenant(request_context)
+        if self._operation_validator:
+            from hindsight_api.extensions import BankReadContext
+
+            ctx = BankReadContext(bank_id=bank_id, operation="get_entity_state", request_context=request_context)
+            await self._validate_operation(self._operation_validator.validate_bank_read(ctx))
         return EntityState(entity_id=entity_id, canonical_name=entity_name, observations=[])
 
     # =========================================================================
@@ -4915,6 +5098,11 @@ class MemoryEngine(MemoryEngineInterface):
     ) -> dict[str, Any]:
         """Get statistics about memory nodes and links for a bank."""
         await self._authenticate_tenant(request_context)
+        if self._operation_validator:
+            from hindsight_api.extensions import BankReadContext
+
+            ctx = BankReadContext(bank_id=bank_id, operation="get_bank_stats", request_context=request_context)
+            await self._validate_operation(self._operation_validator.validate_bank_read(ctx))
         pool = await self._get_pool()
 
         async with acquire_with_retry(pool) as conn:
@@ -4997,6 +5185,11 @@ class MemoryEngine(MemoryEngineInterface):
     ) -> dict[str, Any] | None:
         """Get entity details including metadata and observations."""
         await self._authenticate_tenant(request_context)
+        if self._operation_validator:
+            from hindsight_api.extensions import BankReadContext
+
+            ctx = BankReadContext(bank_id=bank_id, operation="get_entity", request_context=request_context)
+            await self._validate_operation(self._operation_validator.validate_bank_read(ctx))
         pool = await self._get_pool()
 
         async with acquire_with_retry(pool) as conn:
@@ -5365,6 +5558,11 @@ class MemoryEngine(MemoryEngineInterface):
             List of pinned mental model dicts
         """
         await self._authenticate_tenant(request_context)
+        if self._operation_validator:
+            from hindsight_api.extensions import BankReadContext
+
+            ctx = BankReadContext(bank_id=bank_id, operation="list_mental_models", request_context=request_context)
+            await self._validate_operation(self._operation_validator.validate_bank_read(ctx))
         pool = await self._get_pool()
 
         async with acquire_with_retry(pool) as conn:
@@ -5493,6 +5691,11 @@ class MemoryEngine(MemoryEngineInterface):
             The created pinned mental model dict
         """
         await self._authenticate_tenant(request_context)
+        if self._operation_validator:
+            from hindsight_api.extensions import BankWriteContext
+
+            ctx = BankWriteContext(bank_id=bank_id, operation="create_mental_model", request_context=request_context)
+            await self._validate_operation(self._operation_validator.validate_bank_write(ctx))
         pool = await self._get_pool()
 
         # Generate embedding for the content
@@ -5670,6 +5873,11 @@ class MemoryEngine(MemoryEngineInterface):
             Updated pinned mental model dict or None if not found
         """
         await self._authenticate_tenant(request_context)
+        if self._operation_validator:
+            from hindsight_api.extensions import BankWriteContext
+
+            ctx = BankWriteContext(bank_id=bank_id, operation="update_mental_model", request_context=request_context)
+            await self._validate_operation(self._operation_validator.validate_bank_write(ctx))
         pool = await self._get_pool()
 
         async with acquire_with_retry(pool) as conn:
@@ -5755,6 +5963,11 @@ class MemoryEngine(MemoryEngineInterface):
             True if deleted, False if not found
         """
         await self._authenticate_tenant(request_context)
+        if self._operation_validator:
+            from hindsight_api.extensions import BankWriteContext
+
+            ctx = BankWriteContext(bank_id=bank_id, operation="delete_mental_model", request_context=request_context)
+            await self._validate_operation(self._operation_validator.validate_bank_write(ctx))
         pool = await self._get_pool()
 
         async with acquire_with_retry(pool) as conn:
@@ -5829,12 +6042,15 @@ class MemoryEngine(MemoryEngineInterface):
             List of directive dicts
         """
         await self._authenticate_tenant(request_context)
+        if self._operation_validator:
+            from hindsight_api.extensions import BankReadContext
+
+            ctx = BankReadContext(bank_id=bank_id, operation="list_directives", request_context=request_context)
+            await self._validate_operation(self._operation_validator.validate_bank_read(ctx))
         pool = await self._get_pool()
 
         async with acquire_with_retry(pool) as conn:
             # Build filters
-            from .search.tags import build_tags_where_clause
-
             filters = ["bank_id = $1"]
             params: list[Any] = [bank_id]
             param_idx = 2
@@ -5895,6 +6111,11 @@ class MemoryEngine(MemoryEngineInterface):
             Directive dict or None if not found
         """
         await self._authenticate_tenant(request_context)
+        if self._operation_validator:
+            from hindsight_api.extensions import BankReadContext
+
+            ctx = BankReadContext(bank_id=bank_id, operation="get_directive", request_context=request_context)
+            await self._validate_operation(self._operation_validator.validate_bank_read(ctx))
         pool = await self._get_pool()
 
         async with acquire_with_retry(pool) as conn:
@@ -5936,6 +6157,11 @@ class MemoryEngine(MemoryEngineInterface):
             The created directive dict
         """
         await self._authenticate_tenant(request_context)
+        if self._operation_validator:
+            from hindsight_api.extensions import BankWriteContext
+
+            ctx = BankWriteContext(bank_id=bank_id, operation="create_directive", request_context=request_context)
+            await self._validate_operation(self._operation_validator.validate_bank_write(ctx))
         pool = await self._get_pool()
 
         async with acquire_with_retry(pool) as conn:
@@ -5985,6 +6211,11 @@ class MemoryEngine(MemoryEngineInterface):
             Updated directive dict or None if not found
         """
         await self._authenticate_tenant(request_context)
+        if self._operation_validator:
+            from hindsight_api.extensions import BankWriteContext
+
+            ctx = BankWriteContext(bank_id=bank_id, operation="update_directive", request_context=request_context)
+            await self._validate_operation(self._operation_validator.validate_bank_write(ctx))
         pool = await self._get_pool()
 
         # Build update query dynamically
@@ -6050,6 +6281,11 @@ class MemoryEngine(MemoryEngineInterface):
             True if deleted, False if not found
         """
         await self._authenticate_tenant(request_context)
+        if self._operation_validator:
+            from hindsight_api.extensions import BankWriteContext
+
+            ctx = BankWriteContext(bank_id=bank_id, operation="delete_directive", request_context=request_context)
+            await self._validate_operation(self._operation_validator.validate_bank_write(ctx))
         pool = await self._get_pool()
 
         async with acquire_with_retry(pool) as conn:
@@ -6097,6 +6333,11 @@ class MemoryEngine(MemoryEngineInterface):
             Dict with total count and list of operations, sorted by most recent first
         """
         await self._authenticate_tenant(request_context)
+        if self._operation_validator:
+            from hindsight_api.extensions import BankReadContext
+
+            ctx = BankReadContext(bank_id=bank_id, operation="list_operations", request_context=request_context)
+            await self._validate_operation(self._operation_validator.validate_bank_read(ctx))
         pool = await self._get_pool()
 
         async with acquire_with_retry(pool) as conn:
@@ -6178,6 +6419,11 @@ class MemoryEngine(MemoryEngineInterface):
             - child_operations: (for parent operations) list of child operation statuses
         """
         await self._authenticate_tenant(request_context)
+        if self._operation_validator:
+            from hindsight_api.extensions import BankReadContext
+
+            ctx = BankReadContext(bank_id=bank_id, operation="get_operation_status", request_context=request_context)
+            await self._validate_operation(self._operation_validator.validate_bank_read(ctx))
         pool = await self._get_pool()
 
         op_uuid = uuid.UUID(operation_id)
@@ -6307,6 +6553,11 @@ class MemoryEngine(MemoryEngineInterface):
     ) -> dict[str, Any]:
         """Cancel a pending async operation."""
         await self._authenticate_tenant(request_context)
+        if self._operation_validator:
+            from hindsight_api.extensions import BankWriteContext
+
+            ctx = BankWriteContext(bank_id=bank_id, operation="cancel_operation", request_context=request_context)
+            await self._validate_operation(self._operation_validator.validate_bank_write(ctx))
         pool = await self._get_pool()
 
         op_uuid = uuid.UUID(operation_id)
@@ -6342,6 +6593,11 @@ class MemoryEngine(MemoryEngineInterface):
     ) -> dict[str, Any]:
         """Update bank name and/or mission."""
         await self._authenticate_tenant(request_context)
+        if self._operation_validator:
+            from hindsight_api.extensions import BankWriteContext
+
+            ctx = BankWriteContext(bank_id=bank_id, operation="update_bank", request_context=request_context)
+            await self._validate_operation(self._operation_validator.validate_bank_write(ctx))
         pool = await self._get_pool()
 
         async with acquire_with_retry(pool) as conn:
@@ -6468,6 +6724,17 @@ class MemoryEngine(MemoryEngineInterface):
         into smaller sub-batches and creates a parent operation that tracks all children.
         """
         await self._authenticate_tenant(request_context)
+
+        # Run operation validator (bank access, credits, etc.) before queuing
+        if self._operation_validator:
+            from hindsight_api.extensions import RetainContext
+
+            ctx = RetainContext(
+                bank_id=bank_id,
+                contents=[dict(c) for c in contents],
+                request_context=request_context,
+            )
+            await self._validate_operation(self._operation_validator.validate_retain(ctx))
 
         # Validate no duplicate document_ids in the batch
         # Having duplicate document_ids causes race conditions in document upserts during parallel processing
@@ -6712,6 +6979,13 @@ class MemoryEngine(MemoryEngineInterface):
             Dict with operation_id
         """
         await self._authenticate_tenant(request_context)
+        if self._operation_validator:
+            from hindsight_api.extensions import BankWriteContext
+
+            ctx = BankWriteContext(
+                bank_id=bank_id, operation="submit_async_consolidation", request_context=request_context
+            )
+            await self._validate_operation(self._operation_validator.validate_bank_write(ctx))
 
         # Pass tenant_id and api_key_id through task payload so the worker
         # can provide request context to extension hooks (e.g., usage metering

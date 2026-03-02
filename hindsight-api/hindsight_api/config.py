@@ -314,6 +314,7 @@ ENV_WORKER_CONSOLIDATION_MAX_SLOTS = "HINDSIGHT_API_WORKER_CONSOLIDATION_MAX_SLO
 
 # Reflect agent settings
 ENV_REFLECT_MAX_ITERATIONS = "HINDSIGHT_API_REFLECT_MAX_ITERATIONS"
+ENV_REFLECT_MAX_CONTEXT_TOKENS = "HINDSIGHT_API_REFLECT_MAX_CONTEXT_TOKENS"
 ENV_REFLECT_MISSION = "HINDSIGHT_API_REFLECT_MISSION"
 
 # Disposition settings
@@ -453,6 +454,7 @@ DEFAULT_WORKER_CONSOLIDATION_MAX_SLOTS = 2  # Max concurrent consolidation tasks
 
 # Reflect agent settings
 DEFAULT_REFLECT_MAX_ITERATIONS = 10  # Max tool call iterations before forcing response
+DEFAULT_REFLECT_MAX_CONTEXT_TOKENS = 100_000  # Max accumulated context tokens before forcing final prompt
 
 # Disposition defaults (None = not set, fall back to bank DB value or 3)
 DEFAULT_DISPOSITION_SKEPTICISM = None
@@ -688,6 +690,13 @@ class HindsightConfig:
     consolidation_max_tokens: int
     observations_mission: str | None
 
+    # Entity labels (controlled vocabulary of key:value classification labels extracted at retain time)
+    # List of label group dicts: [{key, description, type, optional, values: [{value, description}]}]
+    entity_labels: list | None
+    # Whether to extract regular named entities alongside entity labels (default: True)
+    # When False: only label entities are extracted (or no entities at all if no labels configured)
+    entities_allow_free_form: bool
+
     # Reflect agent settings
     reflect_mission: str | None
 
@@ -720,6 +729,7 @@ class HindsightConfig:
 
     # Reflect agent settings
     reflect_max_iterations: int
+    reflect_max_context_tokens: int
 
     # OpenTelemetry tracing configuration
     otel_traces_enabled: bool
@@ -767,6 +777,9 @@ class HindsightConfig:
         "retain_extraction_mode",
         "retain_mission",
         "retain_custom_instructions",
+        # Entity labels (controlled vocabulary for entity classification)
+        "entity_labels",
+        "entities_allow_free_form",
         # Consolidation settings
         "enable_observations",
         "observations_mission",
@@ -1115,6 +1128,8 @@ class HindsightConfig:
                 os.getenv(ENV_CONSOLIDATION_MAX_TOKENS, str(DEFAULT_CONSOLIDATION_MAX_TOKENS))
             ),
             observations_mission=os.getenv(ENV_OBSERVATIONS_MISSION) or DEFAULT_OBSERVATIONS_MISSION,
+            entity_labels=None,
+            entities_allow_free_form=True,
             # Database migrations
             run_migrations_on_startup=os.getenv(ENV_RUN_MIGRATIONS_ON_STARTUP, "true").lower() == "true",
             # Database connection pool
@@ -1134,6 +1149,9 @@ class HindsightConfig:
             ),
             # Reflect agent settings
             reflect_max_iterations=int(os.getenv(ENV_REFLECT_MAX_ITERATIONS, str(DEFAULT_REFLECT_MAX_ITERATIONS))),
+            reflect_max_context_tokens=int(
+                os.getenv(ENV_REFLECT_MAX_CONTEXT_TOKENS, str(DEFAULT_REFLECT_MAX_CONTEXT_TOKENS))
+            ),
             reflect_mission=os.getenv(ENV_REFLECT_MISSION) or None,
             # Disposition settings (None = fall back to DB value)
             disposition_skepticism=int(os.getenv(ENV_DISPOSITION_SKEPTICISM))

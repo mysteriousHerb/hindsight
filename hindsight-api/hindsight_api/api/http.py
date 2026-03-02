@@ -383,7 +383,15 @@ class MemoryItem(BaseModel):
     )
 
     content: str
-    timestamp: datetime | None = None
+    timestamp: datetime | str | None = Field(
+        default=None,
+        description=(
+            "When the content occurred. "
+            "Accepts an ISO 8601 datetime string (e.g. '2024-01-15T10:30:00Z'), null/omitted (defaults to now), "
+            "or the special string 'unset' to explicitly store without any timestamp "
+            "(use this for timeless content such as fictional documents or static reference material)."
+        ),
+    )
     context: str | None = None
     metadata: dict[str, str] | None = None
     document_id: str | None = Field(default=None, description="Optional document ID for this memory item.")
@@ -395,6 +403,16 @@ class MemoryItem(BaseModel):
         default=None,
         description="Optional tags for visibility scoping. Memories with tags can be filtered during recall.",
     )
+    observation_scopes: Literal["per_tag", "combined", "all_combinations"] | list[list[str]] | None = Field(
+        default=None,
+        title="ObservationScopes",
+        description=(
+            "How to scope observations during consolidation. "
+            "'per_tag' runs one consolidation pass per individual tag, creating separate observations for each tag. "
+            "'combined' (default) runs a single pass with all tags together. "
+            "A list of tag lists runs one pass per inner list, giving full control over which combinations to use."
+        ),
+    )
 
     @field_validator("timestamp", mode="before")
     @classmethod
@@ -404,12 +422,14 @@ class MemoryItem(BaseModel):
         if isinstance(v, datetime):
             return v
         if isinstance(v, str):
+            if v.lower() == "unset":
+                return "unset"
             try:
                 # Try parsing as ISO format
                 return datetime.fromisoformat(v.replace("Z", "+00:00"))
             except ValueError as e:
                 raise ValueError(
-                    f"Invalid timestamp/event_date format: '{v}'. Expected ISO format like '2024-01-15T10:30:00' or '2024-01-15T10:30:00Z'"
+                    f"Invalid timestamp/event_date format: '{v}'. Expected ISO format like '2024-01-15T10:30:00' or '2024-01-15T10:30:00Z', or the special value 'unset' to store without a timestamp."
                 ) from e
         raise ValueError(f"timestamp must be a string or datetime, got {type(v).__name__}")
 
@@ -1933,6 +1953,8 @@ def _register_routes(app: FastAPI):
                 bank_id, type, limit=limit, q=q, tags=tags, tags_match=tags_match, request_context=request_context
             )
             return data
+        except OperationValidationError as e:
+            raise HTTPException(status_code=e.status_code, detail=e.reason)
         except (AuthenticationError, HTTPException):
             raise
         except Exception as e:
@@ -1981,6 +2003,8 @@ def _register_routes(app: FastAPI):
                 request_context=request_context,
             )
             return data
+        except OperationValidationError as e:
+            raise HTTPException(status_code=e.status_code, detail=e.reason)
         except (AuthenticationError, HTTPException):
             raise
         except Exception as e:
@@ -2012,6 +2036,8 @@ def _register_routes(app: FastAPI):
             if data is None:
                 raise HTTPException(status_code=404, detail=f"Memory unit '{memory_id}' not found")
             return data
+        except OperationValidationError as e:
+            raise HTTPException(status_code=e.status_code, detail=e.reason)
         except (AuthenticationError, HTTPException):
             raise
         except Exception as e:
@@ -2355,6 +2381,13 @@ def _register_routes(app: FastAPI):
         try:
             # Authenticate and set tenant schema
             await app.state.memory._authenticate_tenant(request_context)
+            if app.state.memory._operation_validator:
+                from hindsight_api.extensions import BankReadContext
+
+                ctx = BankReadContext(bank_id=bank_id, operation="get_bank_stats", request_context=request_context)
+                await app.state.memory._validate_operation(
+                    app.state.memory._operation_validator.validate_bank_read(ctx)
+                )
             pool = await app.state.memory._get_pool()
             async with acquire_with_retry(pool) as conn:
                 # Get node counts by fact_type
@@ -2488,6 +2521,8 @@ def _register_routes(app: FastAPI):
                     total_observations=total_observations,
                 )
 
+        except OperationValidationError as e:
+            raise HTTPException(status_code=e.status_code, detail=e.reason)
         except (AuthenticationError, HTTPException):
             raise
         except Exception as e:
@@ -2522,6 +2557,8 @@ def _register_routes(app: FastAPI):
                 limit=data["limit"],
                 offset=data["offset"],
             )
+        except OperationValidationError as e:
+            raise HTTPException(status_code=e.status_code, detail=e.reason)
         except (AuthenticationError, HTTPException):
             raise
         except Exception as e:
@@ -2561,6 +2598,8 @@ def _register_routes(app: FastAPI):
                     for obs in entity["observations"]
                 ],
             )
+        except OperationValidationError as e:
+            raise HTTPException(status_code=e.status_code, detail=e.reason)
         except (AuthenticationError, HTTPException):
             raise
         except Exception as e:
@@ -2622,6 +2661,8 @@ def _register_routes(app: FastAPI):
                 request_context=request_context,
             )
             return MentalModelListResponse(items=[MentalModelResponse(**m) for m in mental_models])
+        except OperationValidationError as e:
+            raise HTTPException(status_code=e.status_code, detail=e.reason)
         except (AuthenticationError, HTTPException):
             raise
         except Exception as e:
@@ -2780,6 +2821,8 @@ def _register_routes(app: FastAPI):
             if mental_model is None:
                 raise HTTPException(status_code=404, detail=f"Mental model '{mental_model_id}' not found")
             return MentalModelResponse(**mental_model)
+        except OperationValidationError as e:
+            raise HTTPException(status_code=e.status_code, detail=e.reason)
         except (AuthenticationError, HTTPException):
             raise
         except Exception as e:
@@ -2811,6 +2854,8 @@ def _register_routes(app: FastAPI):
             if not deleted:
                 raise HTTPException(status_code=404, detail=f"Mental model '{mental_model_id}' not found")
             return {"status": "deleted"}
+        except OperationValidationError as e:
+            raise HTTPException(status_code=e.status_code, detail=e.reason)
         except (AuthenticationError, HTTPException):
             raise
         except Exception as e:
@@ -2853,6 +2898,8 @@ def _register_routes(app: FastAPI):
                 request_context=request_context,
             )
             return DirectiveListResponse(items=[DirectiveResponse(**d) for d in directives])
+        except OperationValidationError as e:
+            raise HTTPException(status_code=e.status_code, detail=e.reason)
         except (AuthenticationError, HTTPException):
             raise
         except Exception as e:
@@ -2885,6 +2932,8 @@ def _register_routes(app: FastAPI):
             if directive is None:
                 raise HTTPException(status_code=404, detail=f"Directive '{directive_id}' not found")
             return DirectiveResponse(**directive)
+        except OperationValidationError as e:
+            raise HTTPException(status_code=e.status_code, detail=e.reason)
         except (AuthenticationError, HTTPException):
             raise
         except Exception as e:
@@ -2921,6 +2970,8 @@ def _register_routes(app: FastAPI):
             return DirectiveResponse(**directive)
         except ValueError as e:
             raise HTTPException(status_code=400, detail=str(e))
+        except OperationValidationError as e:
+            raise HTTPException(status_code=e.status_code, detail=e.reason)
         except (AuthenticationError, HTTPException):
             raise
         except Exception as e:
@@ -2959,6 +3010,8 @@ def _register_routes(app: FastAPI):
             if directive is None:
                 raise HTTPException(status_code=404, detail=f"Directive '{directive_id}' not found")
             return DirectiveResponse(**directive)
+        except OperationValidationError as e:
+            raise HTTPException(status_code=e.status_code, detail=e.reason)
         except (AuthenticationError, HTTPException):
             raise
         except Exception as e:
@@ -2990,6 +3043,8 @@ def _register_routes(app: FastAPI):
             if not deleted:
                 raise HTTPException(status_code=404, detail=f"Directive '{directive_id}' not found")
             return {"status": "deleted"}
+        except OperationValidationError as e:
+            raise HTTPException(status_code=e.status_code, detail=e.reason)
         except (AuthenticationError, HTTPException):
             raise
         except Exception as e:
@@ -3009,7 +3064,13 @@ def _register_routes(app: FastAPI):
     )
     async def api_list_documents(
         bank_id: str,
-        q: str | None = None,
+        q: str | None = Query(
+            None, description="Case-insensitive substring filter on document ID (e.g. 'report' matches 'report-2024')"
+        ),
+        tags: list[str] | None = Query(None, description="Filter documents by tags"),
+        tags_match: str = Query(
+            "any_strict", description="How to match tags: 'any', 'all', 'any_strict', 'all_strict'"
+        ),
         limit: int = 100,
         offset: int = 0,
         request_context: RequestContext = Depends(get_request_context),
@@ -3019,15 +3080,25 @@ def _register_routes(app: FastAPI):
 
         Args:
             bank_id: Memory Bank ID (from path)
-            q: Search query (searches document ID and metadata)
+            q: Case-insensitive substring filter on document ID
+            tags: Filter documents by tags
+            tags_match: How to match tags (any, all, any_strict, all_strict)
             limit: Maximum number of results (default: 100)
             offset: Offset for pagination (default: 0)
         """
         try:
             data = await app.state.memory.list_documents(
-                bank_id=bank_id, search_query=q, limit=limit, offset=offset, request_context=request_context
+                bank_id=bank_id,
+                search_query=q,
+                tags=tags,
+                tags_match=tags_match,
+                limit=limit,
+                offset=offset,
+                request_context=request_context,
             )
             return data
+        except OperationValidationError as e:
+            raise HTTPException(status_code=e.status_code, detail=e.reason)
         except (AuthenticationError, HTTPException):
             raise
         except Exception as e:
@@ -3060,6 +3131,8 @@ def _register_routes(app: FastAPI):
             if not document:
                 raise HTTPException(status_code=404, detail="Document not found")
             return document
+        except OperationValidationError as e:
+            raise HTTPException(status_code=e.status_code, detail=e.reason)
         except (AuthenticationError, HTTPException):
             raise
         except Exception as e:
@@ -3113,6 +3186,8 @@ def _register_routes(app: FastAPI):
                 request_context=request_context,
             )
             return data
+        except OperationValidationError as e:
+            raise HTTPException(status_code=e.status_code, detail=e.reason)
         except (AuthenticationError, HTTPException):
             raise
         except Exception as e:
@@ -3142,6 +3217,8 @@ def _register_routes(app: FastAPI):
             if not chunk:
                 raise HTTPException(status_code=404, detail="Chunk not found")
             return chunk
+        except OperationValidationError as e:
+            raise HTTPException(status_code=e.status_code, detail=e.reason)
         except (AuthenticationError, HTTPException):
             raise
         except Exception as e:
@@ -3186,6 +3263,8 @@ def _register_routes(app: FastAPI):
                 document_id=document_id,
                 memory_units_deleted=result["memory_units_deleted"],
             )
+        except OperationValidationError as e:
+            raise HTTPException(status_code=e.status_code, detail=e.reason)
         except (AuthenticationError, HTTPException):
             raise
         except Exception as e:
@@ -3222,6 +3301,8 @@ def _register_routes(app: FastAPI):
                 offset=offset,
                 operations=[OperationResponse(**op) for op in result["operations"]],
             )
+        except OperationValidationError as e:
+            raise HTTPException(status_code=e.status_code, detail=e.reason)
         except (AuthenticationError, HTTPException):
             raise
         except Exception as e:
@@ -3253,6 +3334,8 @@ def _register_routes(app: FastAPI):
 
             result = await app.state.memory.get_operation_status(bank_id, operation_id, request_context=request_context)
             return OperationStatusResponse(**result)
+        except OperationValidationError as e:
+            raise HTTPException(status_code=e.status_code, detail=e.reason)
         except (AuthenticationError, HTTPException):
             raise
         except Exception as e:
@@ -3285,6 +3368,8 @@ def _register_routes(app: FastAPI):
             return CancelOperationResponse(**result)
         except ValueError as e:
             raise HTTPException(status_code=404, detail=str(e))
+        except OperationValidationError as e:
+            raise HTTPException(status_code=e.status_code, detail=e.reason)
         except (AuthenticationError, HTTPException):
             raise
         except Exception as e:
@@ -3321,6 +3406,8 @@ def _register_routes(app: FastAPI):
                 mission=mission,
                 background=mission,  # Backwards compat
             )
+        except OperationValidationError as e:
+            raise HTTPException(status_code=e.status_code, detail=e.reason)
         except (AuthenticationError, HTTPException):
             raise
         except Exception as e:
@@ -3364,6 +3451,8 @@ def _register_routes(app: FastAPI):
                 mission=mission,
                 background=mission,  # Backwards compat
             )
+        except OperationValidationError as e:
+            raise HTTPException(status_code=e.status_code, detail=e.reason)
         except (AuthenticationError, HTTPException):
             raise
         except Exception as e:
@@ -3392,6 +3481,8 @@ def _register_routes(app: FastAPI):
             )
             mission = result.get("mission") or ""
             return BackgroundResponse(mission=mission, background=mission)
+        except OperationValidationError as e:
+            raise HTTPException(status_code=e.status_code, detail=e.reason)
         except (AuthenticationError, HTTPException):
             raise
         except Exception as e:
@@ -3445,6 +3536,8 @@ def _register_routes(app: FastAPI):
                 mission=mission,
                 background=mission,  # Backwards compat
             )
+        except OperationValidationError as e:
+            raise HTTPException(status_code=e.status_code, detail=e.reason)
         except (AuthenticationError, HTTPException):
             raise
         except Exception as e:
@@ -3498,6 +3591,8 @@ def _register_routes(app: FastAPI):
                 mission=mission,
                 background=mission,  # Backwards compat
             )
+        except OperationValidationError as e:
+            raise HTTPException(status_code=e.status_code, detail=e.reason)
         except (AuthenticationError, HTTPException):
             raise
         except Exception as e:
@@ -3527,6 +3622,8 @@ def _register_routes(app: FastAPI):
                 + result.get("entities_deleted", 0)
                 + result.get("documents_deleted", 0),
             )
+        except OperationValidationError as e:
+            raise HTTPException(status_code=e.status_code, detail=e.reason)
         except (AuthenticationError, HTTPException):
             raise
         except Exception as e:
@@ -3553,6 +3650,8 @@ def _register_routes(app: FastAPI):
                 message=f"Cleared {result.get('deleted_count', 0)} observations",
                 deleted_count=result.get("deleted_count", 0),
             )
+        except OperationValidationError as e:
+            raise HTTPException(status_code=e.status_code, detail=e.reason)
         except (AuthenticationError, HTTPException):
             raise
         except Exception as e:
@@ -3585,6 +3684,8 @@ def _register_routes(app: FastAPI):
                 request_context=request_context,
             )
             return ClearMemoryObservationsResponse(deleted_count=result["deleted_count"])
+        except OperationValidationError as e:
+            raise HTTPException(status_code=e.status_code, detail=e.reason)
         except (AuthenticationError, HTTPException):
             raise
         except Exception as e:
@@ -3615,6 +3716,13 @@ def _register_routes(app: FastAPI):
         try:
             # Authenticate and set schema context for multi-tenant DB queries
             await app.state.memory._authenticate_tenant(request_context)
+            if app.state.memory._operation_validator:
+                from hindsight_api.extensions import BankReadContext
+
+                ctx = BankReadContext(bank_id=bank_id, operation="get_bank_config", request_context=request_context)
+                await app.state.memory._validate_operation(
+                    app.state.memory._operation_validator.validate_bank_read(ctx)
+                )
 
             # Get resolved config from config resolver
             config_dict = await app.state.memory._config_resolver.get_bank_config(bank_id, request_context)
@@ -3623,6 +3731,8 @@ def _register_routes(app: FastAPI):
             bank_overrides = await app.state.memory._config_resolver._load_bank_config(bank_id)
 
             return BankConfigResponse(bank_id=bank_id, config=config_dict, overrides=bank_overrides)
+        except OperationValidationError as e:
+            raise HTTPException(status_code=e.status_code, detail=e.reason)
         except (AuthenticationError, HTTPException):
             raise
         except Exception as e:
@@ -3653,6 +3763,13 @@ def _register_routes(app: FastAPI):
         try:
             # Authenticate and set schema context for multi-tenant DB queries
             await app.state.memory._authenticate_tenant(request_context)
+            if app.state.memory._operation_validator:
+                from hindsight_api.extensions import BankWriteContext
+
+                ctx = BankWriteContext(bank_id=bank_id, operation="update_bank_config", request_context=request_context)
+                await app.state.memory._validate_operation(
+                    app.state.memory._operation_validator.validate_bank_write(ctx)
+                )
 
             # Update config via config resolver (validates configurable fields and permissions)
             await app.state.memory._config_resolver.update_bank_config(bank_id, request.updates, request_context)
@@ -3662,6 +3779,8 @@ def _register_routes(app: FastAPI):
             bank_overrides = await app.state.memory._config_resolver._load_bank_config(bank_id)
 
             return BankConfigResponse(bank_id=bank_id, config=config_dict, overrides=bank_overrides)
+        except OperationValidationError as e:
+            raise HTTPException(status_code=e.status_code, detail=e.reason)
         except ValueError as e:
             # Validation error (e.g., trying to override static field)
             raise HTTPException(status_code=400, detail=str(e))
@@ -3693,6 +3812,13 @@ def _register_routes(app: FastAPI):
         try:
             # Authenticate and set schema context for multi-tenant DB queries
             await app.state.memory._authenticate_tenant(request_context)
+            if app.state.memory._operation_validator:
+                from hindsight_api.extensions import BankWriteContext
+
+                ctx = BankWriteContext(bank_id=bank_id, operation="reset_bank_config", request_context=request_context)
+                await app.state.memory._validate_operation(
+                    app.state.memory._operation_validator.validate_bank_write(ctx)
+                )
 
             # Reset config via config resolver
             await app.state.memory._config_resolver.reset_bank_config(bank_id)
@@ -3702,6 +3828,8 @@ def _register_routes(app: FastAPI):
             bank_overrides = await app.state.memory._config_resolver._load_bank_config(bank_id)
 
             return BankConfigResponse(bank_id=bank_id, config=config_dict, overrides=bank_overrides)
+        except OperationValidationError as e:
+            raise HTTPException(status_code=e.status_code, detail=e.reason)
         except (AuthenticationError, HTTPException):
             raise
         except Exception as e:
@@ -3727,6 +3855,8 @@ def _register_routes(app: FastAPI):
                 operation_id=result["operation_id"],
                 deduplicated=result.get("deduplicated", False),
             )
+        except OperationValidationError as e:
+            raise HTTPException(status_code=e.status_code, detail=e.reason)
         except (AuthenticationError, HTTPException):
             raise
         except Exception as e:
@@ -3772,7 +3902,9 @@ def _register_routes(app: FastAPI):
             contents = []
             for item in request.items:
                 content_dict = {"content": item.content}
-                if item.timestamp:
+                if item.timestamp == "unset":
+                    content_dict["event_date"] = None
+                elif item.timestamp:
                     content_dict["event_date"] = item.timestamp
                 if item.context:
                     content_dict["context"] = item.context
@@ -3784,6 +3916,8 @@ def _register_routes(app: FastAPI):
                     content_dict["entities"] = [{"text": e.text, "type": e.type or "CONCEPT"} for e in item.entities]
                 if item.tags:
                     content_dict["tags"] = item.tags
+                if item.observation_scopes is not None:
+                    content_dict["observation_scopes"] = item.observation_scopes
                 contents.append(content_dict)
 
             if request.async_:
@@ -4012,6 +4146,8 @@ def _register_routes(app: FastAPI):
             await app.state.memory.delete_bank(bank_id, fact_type=type, request_context=request_context)
 
             return DeleteResponse(success=True)
+        except OperationValidationError as e:
+            raise HTTPException(status_code=e.status_code, detail=e.reason)
         except (AuthenticationError, HTTPException):
             raise
         except Exception as e:

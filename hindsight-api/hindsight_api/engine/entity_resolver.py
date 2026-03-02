@@ -12,6 +12,7 @@ import asyncpg
 
 from .db_utils import acquire_with_retry
 from .memory_engine import fq_table
+from .retain.entity_labels import build_labels_lookup as _build_labels_lookup_from_config
 
 # Load spaCy model (singleton)
 _nlp = None
@@ -31,6 +32,11 @@ class EntityResolver:
         """
         self.pool = pool
 
+    @staticmethod
+    def _build_labels_lookup(entity_labels: list | None) -> set[str]:
+        """Build a set of valid 'key:value' entity label strings for fast lookup."""
+        return _build_labels_lookup_from_config(entity_labels)
+
     async def resolve_entities_batch(
         self,
         bank_id: str,
@@ -38,6 +44,7 @@ class EntityResolver:
         context: str,
         unit_event_date,
         conn=None,
+        entity_labels: list | None = None,
     ) -> list[str]:
         """
         Resolve multiple entities in batch (MUCH faster than sequential).
@@ -58,14 +65,25 @@ class EntityResolver:
         if not entities_data:
             return []
 
+        taxonomy_lookup = self._build_labels_lookup(entity_labels)
         if conn is None:
             async with acquire_with_retry(self.pool) as conn:
-                return await self._resolve_entities_batch_impl(conn, bank_id, entities_data, context, unit_event_date)
+                return await self._resolve_entities_batch_impl(
+                    conn, bank_id, entities_data, context, unit_event_date, taxonomy_lookup
+                )
         else:
-            return await self._resolve_entities_batch_impl(conn, bank_id, entities_data, context, unit_event_date)
+            return await self._resolve_entities_batch_impl(
+                conn, bank_id, entities_data, context, unit_event_date, taxonomy_lookup
+            )
 
     async def _resolve_entities_batch_impl(
-        self, conn, bank_id: str, entities_data: list[dict], context: str, unit_event_date
+        self,
+        conn,
+        bank_id: str,
+        entities_data: list[dict],
+        context: str,
+        unit_event_date,
+        taxonomy_lookup: set[str] | None = None,
     ) -> list[str]:
         # Query ALL candidates for this bank
         all_entities = await conn.fetch(
@@ -135,11 +153,18 @@ class EntityResolver:
         entities_to_update = []  # (entity_id, event_date)
         entities_to_create = []  # (idx, entity_data, event_date)
 
+        taxonomy_lookup = taxonomy_lookup or set()
+
         for idx, entity_data in enumerate(entities_data):
             entity_text = entity_data["text"]
             nearby_entities = entity_data.get("nearby_entities", [])
             # Use per-entity date if available, otherwise fall back to batch-level date
             entity_event_date = entity_data.get("event_date", unit_event_date)
+
+            # Taxonomy entities: skip fuzzy matching, use exact canonical name
+            if taxonomy_lookup and entity_text.lower() in taxonomy_lookup:
+                entities_to_create.append((idx, entity_data, entity_event_date))
+                continue
 
             candidates = all_candidates.get(entity_text, [])
 
@@ -237,7 +262,7 @@ class EntityResolver:
             rows = await conn.fetch(
                 f"""
                 INSERT INTO {fq_table("entities")} (bank_id, canonical_name, first_seen, last_seen, mention_count)
-                SELECT $1, name, event_date, event_date, cnt
+                SELECT $1, name, COALESCE(event_date, now()), COALESCE(event_date, now()), cnt
                 FROM unnest($2::text[], $3::timestamptz[], $4::int[]) AS t(name, event_date, cnt)
                 ON CONFLICT (bank_id, LOWER(canonical_name))
                 DO UPDATE SET
@@ -408,7 +433,7 @@ class EntityResolver:
         entity_id = await conn.fetchval(
             f"""
             INSERT INTO {fq_table("entities")} (bank_id, canonical_name, first_seen, last_seen, mention_count)
-            VALUES ($1, $2, $3, $4, 1)
+            VALUES ($1, $2, COALESCE($3, now()), COALESCE($4, now()), 1)
             ON CONFLICT (bank_id, LOWER(canonical_name))
             DO UPDATE SET
                 mention_count = {fq_table("entities")}.mention_count + 1,

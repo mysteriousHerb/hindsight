@@ -65,7 +65,7 @@ fi
 print_info "Updating version in all components..."
 
 # Update Python packages
-PYTHON_PACKAGES=("hindsight-api" "hindsight-dev" "hindsight" "hindsight-integrations/litellm" "hindsight-integrations/crewai" "hindsight-embed")
+PYTHON_PACKAGES=("hindsight-api" "hindsight-dev" "hindsight" "hindsight-integrations/litellm" "hindsight-integrations/crewai" "hindsight-integrations/pydantic-ai" "hindsight-embed")
 for package in "${PYTHON_PACKAGES[@]}"; do
     PYPROJECT_FILE="$package/pyproject.toml"
     if [ -f "$PYPROJECT_FILE" ]; then
@@ -164,6 +164,16 @@ else
     print_warn "File $AI_SDK_PKG not found, skipping"
 fi
 
+# Update Chat SDK integration
+CHAT_SDK_PKG="hindsight-integrations/chat/package.json"
+if [ -f "$CHAT_SDK_PKG" ]; then
+    print_info "Updating $CHAT_SDK_PKG"
+    sed -i.bak "s/\"version\": \".*\"/\"version\": \"$VERSION\"/" "$CHAT_SDK_PKG"
+    rm "${CHAT_SDK_PKG}.bak"
+else
+    print_warn "File $CHAT_SDK_PKG not found, skipping"
+fi
+
 # Update documentation version (creates new version or syncs to existing)
 print_info "Updating documentation for version $VERSION..."
 if [ -f "scripts/update-docs-version.sh" ]; then
@@ -206,13 +216,14 @@ COMMIT_MSG="Release v$VERSION
 
 - Update version to $VERSION in all components
 - Regenerate OpenAPI spec and client SDKs
-- Python packages: hindsight-api, hindsight-dev, hindsight-all, hindsight-litellm, hindsight-crewai, hindsight-embed
+- Python packages: hindsight-api, hindsight-dev, hindsight-all, hindsight-litellm, hindsight-crewai, hindsight-pydantic-ai, hindsight-embed
 - Python client: hindsight-clients/python
 - TypeScript client: hindsight-clients/typescript
 - Rust CLI: hindsight-cli
 - Control Plane: hindsight-control-plane
 - OpenClaw integration: hindsight-integrations/openclaw
 - AI SDK integration: hindsight-integrations/ai-sdk
+- Chat SDK integration: hindsight-integrations/chat
 - Helm chart"
 
 # Add docs update note
